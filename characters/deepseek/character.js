@@ -58,11 +58,13 @@
   // 换装：晚上 10 点到早上 7 点穿睡衣，12 月到 2 月的白天穿冬装（设置里可以关掉）。
   // 表情会自动贴到这两张图的脸上，所以这两张图里头和脸的位置必须和 normal 一样。
   outfits: { pajamas: "models/deepseek/outfit_pajamas.png", winter: "models/deepseek/outfit_winter.png" },
-// 换装姿势图：由「收图验收」工具按 models/deepseek/<衣服>/ 里的文件登记，装入时会整段重写；
+  // 换装姿势图：由「收图验收」工具按 models/deepseek/<衣服>/ 里的文件登记，装入时会整段重写；
   // 手工登记的图只要文件放在 models 里，重写时也会被带上。
   outfitPoses: {
     pajamas: {
       "held": "models/deepseek/pajamas/held.png",
+      "wave1": "models/deepseek/pajamas/wave1.png",
+      "wave2": "models/deepseek/pajamas/wave2.png",
     },
     winter: {
       "held": "models/deepseek/winter/held.png",

@@ -205,6 +205,24 @@ function outfitPosesBlock(installed) {
     "  // 手工登记的图只要文件放在 models 里，重写时也会被带上。\n  outfitPoses: {\n" +
     body("pajamas") + "\n" + body("winter") + "\n  },";
 }
+// 剥掉文件里所有 outfitPoses 块（连同紧邻上方的标记注释行）。用大括号深度找块尾，
+// 不靠正则猜闭合——历史上插入缩进不一致时曾造成两块并存、旧块生效的事故。
+function stripOutfitPoses(text) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*outfitPoses:\s*\{\s*$/.test(lines[i])) { out.push(lines[i]); continue; }
+    while (out.length && /^\s*\/\//.test(out[out.length - 1])) out.pop(); // 连同紧邻上方的注释行（标记有两行，别只认关键词）
+    let depth = 1;
+    i++;
+    while (i < lines.length && depth > 0) {
+      depth += (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
+      i++;
+    }
+    i--;
+  }
+  return out.join("\n");
+}
 
 function install(jsonPath) {
   const verdicts = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
@@ -260,22 +278,36 @@ function install(jsonPath) {
     if (!has && !byRole[role]) continue;
     const charFile = path.join(ROOT, "characters", role, "character.js");
     if (!exists(charFile)) continue;
-    let text = fs.readFileSync(charFile, "utf8");
+    const text = fs.readFileSync(charFile, "utf8");
+    // 期望的登记表（与写入的块一一对应，装完要实际执行核对）
+    const expect = {};
+    for (const outfit of OUTFITS)
+      expect[outfit] = Object.fromEntries(installed[outfit].map((e) => [e.key, `models/${role}/${outfit}/${e.file}.png`]));
     const block = outfitPosesBlock(installed).replaceAll("{{ROLE}}", role);
+    // 先剥掉所有旧 outfitPoses 块（包括标记不一致的历史遗留），再在 outfits 行后插入唯一一份
+    const stripped = stripOutfitPoses(text);
     let next;
-    if (/^ {2}\/\/ 换装姿势图：由「收图验收」工具[\s\S]*?\n {2}\},$/m.test(text)) {
-      next = text.replace(/^ {2}\/\/ 换装姿势图：由「收图验收」工具[\s\S]*?\n {2}\},$/m, block.trim());
-    } else if (/^ {2}outfits: \{[^\n]*\},$/m.test(text)) {
-      next = text.replace(/^( {2}outfits: \{[^\n]*\},)$/m, "$1\n" + block.trim());
+    if (/^ {2}outfits: \{[^\n]*\},$/m.test(stripped)) {
+      next = stripped.replace(/^( {2}outfits: \{[^\n]*\},)$/m, "$1" + block);
     } else {
       console.log(`  ${role}: 没找到 outfits 行， outfitPoses 没写入，请手工登记`);
+      continue;
+    }
+    // 写入前实际执行一遍，确认生效的 outfitPoses 就是期望值（对象字面量重复键时后者生效，语法检查抓不住）
+    const sandbox = { window: {} };
+    try {
+      new Function("window", next)(sandbox.window);
+      const got = ((sandbox.window.Live2DMascotCharacters || {})[role] || {}).outfitPoses;
+      if (JSON.stringify(got) !== JSON.stringify(expect)) throw new Error("执行后生效的 outfitPoses 与期望不符");
+    } catch (e) {
+      console.log(`  ${role}: 登记校验失败（${e.message}），保持原文件不动`);
       continue;
     }
     const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
     const bak = charFile + ".备份" + stamp;
     if (!exists(bak)) fs.copyFileSync(charFile, bak);
     fs.writeFileSync(charFile, next);
-    console.log(`  ${role}: outfitPoses 登记 ${installed.pajamas.length + installed.winter.length} 条（睡衣 ${installed.pajamas.length}，冬装 ${installed.winter.length}）`);
+    console.log(`  ${role}: outfitPoses 登记 ${installed.pajamas.length + installed.winter.length} 条（睡衣 ${installed.pajamas.length}，冬装 ${installed.winter.length}）——已执行核对生效`);
   }
   console.log(`\n装好了 ${copied} 张${skipped ? `，退回 ${skipped} 张没有装` : ""}${refused ? `，拒绝 ${refused} 张（版本或选稿未确认）` : ""}。`);
   console.log("桌面宠物和网页都要重新打开才会用上新图。");

@@ -51,6 +51,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {
       "Content-Type": TYPES[path.extname(file).toLowerCase()] || "application/octet-stream",
       "Content-Length": stat.size,
+      // 本地开发用：装入新图/改角色包后，浏览器别拿旧缓存（桌面版走 pet:// 不受影响）
+      "Cache-Control": "no-cache",
     });
     fs.createReadStream(file).pipe(res);
   });
