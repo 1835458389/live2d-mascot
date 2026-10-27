@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Live2D Mascot</title>
+<!--
+  Character: Hiyori (Live2D official Cubism 4 sample model).
+  This content uses sample data owned and copyrighted by Live2D Inc. The
+  sample data are utilized in accordance with terms and conditions set by
+  Live2D Inc. This content itself is created at the author's sole discretion.
+  https://www.live2d.com/eula/live2d-sample-model-terms_en.html
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f1c; }
+  body {
+    background:
+      radial-gradient(1200px 700px at 50% 15%, #2a2350 0%, transparent 60%),
+      linear-gradient(180deg, #14152a 0%, #0a0a16 60%, #06060d 100%);
+  }
+  canvas { display: block; touch-action: none; cursor: pointer; }
+
+  #floorShadow {
+    position: fixed;
+    bottom: 3vh;
+    width: 180px;
+    height: 26px;
+    margin-left: -90px;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 72%);
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 1;
+  }
+
+  #hint {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.55); font: 14px/1.4 -apple-system, "Segoe UI", sans-serif;
+    pointer-events: none; letter-spacing: .02em; text-shadow: 0 1px 6px rgba(0,0,0,.6);
+    transition: opacity 1s ease;
+    z-index: 2;
+  }
+
+  #controls {
+    position: fixed; bottom: 18px; right: 18px; z-index: 3;
+    display: flex; gap: 8px; align-items: center;
+    font: 13px -apple-system, "Segoe UI", sans-serif;
+  }
+  #modeLabel {
+    color: rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.06);
+    padding: 6px 10px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  #toggleBtn {
+    color: #fff;
+    background: rgba(120,110,220,0.35);
+    border: 1px solid rgba(180,170,255,0.4);
+    padding: 6px 14px; border-radius: 999px;
+    cursor: pointer; font-weight: 600;
+    backdrop-filter: blur(6px);
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  #toggleBtn:hover { background: rgba(140,130,240,0.5); }
+  #toggleBtn:active { transform: scale(0.95); }
+
+  #credit {
+    position: fixed; bottom: 8px; left: 10px; z-index: 3;
+    color: rgba(255,255,255,0.28); font: 11px -apple-system, "Segoe UI", sans-serif;
+    pointer-events: none;
+  }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.5); font: 14px -apple-system, "Segoe UI", sans-serif;
+    z-index: 5; transition: opacity 0.4s ease;
+  }
+</style>
+</head>
+<body>
+<div id="loading">loading mascot…</div>
+<div id="floorShadow"></div>
+<div id="hint">move your cursor near her — click to interact</div>
+<div id="credit" title="This content uses sample data owned and copyrighted by Live2D Inc. The sample data are utilized in accordance with terms and conditions set by Live2D Inc. This content itself is created at the author's sole discretion.">Hiyori sample model © Live2D Inc.</div>
+<div id="controls">
+  <span id="modeLabel">Idle</span>
+  <button id="toggleBtn">🚶 Walk</button>
+</div>
+<canvas id="canvas"></canvas>
+
+<!-- PixiJS v6 (required by pixi-live2d-display) -->
+<script src="./vendor/pixi.min.js"></script>
+<!-- Cubism 4 core runtime (needed to run the "Hiyori" sample model) -->
+<script src="./vendor/live2dcubismcore.min.js"></script>
+<!-- pixi-live2d-display, Cubism 4 build -->
+<script src="./vendor/cubism4.min.js"></script>
+
+<script src="./main.js"></script>
+</body>
+</html>

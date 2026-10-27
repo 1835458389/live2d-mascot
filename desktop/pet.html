@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>桌面看板娘</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+</style>
+</head>
+<body>
+<script>
+  window.LIVE2D_MASCOT_CONFIG = {
+    position: "bottom-right",
+    desktop: {
+      onInteractiveChange: (v) => petDesktop.setInteractive(v),
+      onClose: () => petDesktop.quit(),
+      onWindows: (fn) => petDesktop.onWindows(fn),
+      onForeground: (fn) => petDesktop.onForeground(fn),
+      chat: (payload) => petDesktop.chat(payload),
+      speak: (payload) => petDesktop.speak(payload),
+    },
+  };
+
+  petDesktop.onOpenSettings(() => window.Live2DMascot && Live2DMascot.openSettings());
+  petDesktop.onWakeUp(() => {
+    if (!window.Live2DMascot) return;
+    Live2DMascot.restore();
+    Live2DMascot.say("我在这里哦～", "happy");
+  });
+
+  // A short line another program asked her to say (the AI company reporting a finished job).
+  petDesktop.onSay((line) => {
+    if (window.Live2DMascot && line && typeof line.text === "string") Live2DMascot.say(line.text.slice(0, 60), line.mood);
+  });
+
+  // Tray icon: the same paw as the widget's "call her back" button.
+  const icon = document.createElement("canvas");
+  icon.width = icon.height = 64;
+  const ctx = icon.getContext("2d");
+  ctx.fillStyle = "#7a6edc";
+  ctx.beginPath();
+  ctx.arc(32, 32, 31, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = '38px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("\u{1F43E}", 32, 35);
+  petDesktop.setTrayIcon(icon.toDataURL("image/png"));
+</script>
+<script src="../widget.js"></script>
+</body>
+</html>

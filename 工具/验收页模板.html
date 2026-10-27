@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>换装姿势图 · 收图验收</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 "Microsoft YaHei", system-ui, sans-serif; color: #222; background: #f6f6f4; }
+  header { position: sticky; top: 0; z-index: 9; background: #fff; border-bottom: 1px solid #ddd;
+           padding: 10px 18px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; }
+  #summary { color: #555; }
+  #summary b.ok { color: #1a7f37; } #summary b.bad { color: #c0392b; } #summary b.wait { color: #a07000; }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid #bbb; background: #fff; border-radius: 6px; cursor: pointer; }
+  button:hover { background: #f0f0ee; }
+  #list { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 14px; padding: 16px; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; }
+  .card.reject { outline: 2px solid #c0392b; }
+  .card.locked { outline: 2px dashed #c0392b; background: #fffafa; }
+  .verdict label:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
+  .card h2 { font-size: 15px; margin: 0 0 6px; font-weight: 600; }
+  .card h2 .sub { color: #888; font-weight: 400; margin-left: 8px; }
+  .flags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+  .flag { font-size: 13px; padding: 1px 8px; border-radius: 10px; border: 1px solid; }
+  .flag.ok   { color: #1a7f37; border-color: #9fd3ab; background: #f0faf2; }
+  .flag.warn { color: #a07000; border-color: #e6c76a; background: #fdf8e7; }
+  .flag.bad  { color: #c0392b; border-color: #eba6a0; background: #fdf0ef; }
+  .flag.info { color: #666;  border-color: #ccc; background: #f4f4f4; }
+  .views { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .view { text-align: center; }
+  .view .cap { font-size: 12.5px; color: #777; margin-bottom: 4px; }
+  .box { position: relative; width: 170px; height: 255px; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+         border: 1px solid #ccc; overflow: hidden; }
+  .box img, .box canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .box .top { z-index: 2; }
+  .blink .top { animation: blinkimg .9s steps(1) infinite; }
+  @keyframes blinkimg { 50% { opacity: 0; } }
+  input[type=range] { width: 170px; margin: 4px 0 0; }
+  .verdict { margin-top: 10px; display: flex; gap: 4px; align-items: center; font-size: 14px; }
+  .verdict label { padding: 3px 12px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; }
+  .verdict input { display: none; }
+  .verdict input:checked + span { font-weight: 700; }
+  .verdict .pass input:checked + span { color: #1a7f37; } .verdict .pass:has(input:checked) { border-color: #1a7f37; background: #f0faf2; }
+  .verdict .fail input:checked + span { color: #c0392b; } .verdict .fail:has(input:checked) { border-color: #c0392b; background: #fdf0ef; }
+  .note { font-size: 12.5px; color: #888; margin-top: 6px; }
+  footer { padding: 10px 18px 30px; color: #777; font-size: 13px; }
+  .empty { padding: 40px; text-align: center; color: #777; }
+</style>
+
+<header>
+  <h1>换装姿势图 · 收图验收</h1>
+  <div id="summary">正在读取图片……</div>
+  <div class="btns">
+    <button id="allPass">没问题的都标通过</button>
+    <button id="export">下载验收结果.json</button>
+  </div>
+</header>
+<div id="list"></div>
+<footer>
+  用法：逐张看卡片。自动体检只查「尺寸、白底、脸、人物位置」这四样，最后还是要人眼确认姿势和衣服。
+  「叠加对比」拖滑块或点卡片让它闪烁，越自然说明越贴合底图；「轮廓叠影」里品红是底图、青色是新图，重合的部分颜色最深。
+  判断完点 通过 / 退回，全部弄完下载「验收结果.json」，回到黑窗口按提示装入。
+  判定只对当前这一稿有效（按内容哈希绑定）：换过稿会自动回到待定。
+  标「冲突待选」的卡不能判定：各来源都保留着，请把选中的那张复制进 收图 对应位置覆盖，再重新运行本工具。
+</footer>
+
+<script src="/characters/claude/character.js"></script>
+<script src="/characters/gpt/character.js"></script>
+<script src="/characters/deepseek/character.js"></script>
+<script>
+"use strict";
+const INDEX = /*__INDEX__*/[];
+const CHARS = window.Live2DMascotCharacters || {};
+const CHAR_ORDER = { claude: 0, gpt: 1, deepseek: 2 };
+const OUTFIT_ORDER = { pajamas: 0, winter: 1 };
+const PAIR = { walk1: "walk", walk2: "walk", wave1: "wave", wave2: "wave", drink1: "drink", drink2: "drink",
+               act1: "act", act2: "act", cheer1: "cheer", cheer2: "cheer", climb: "climb", climb2: "climb" };
+const OUTFIT_NAME = { pajamas: "睡衣", winter: "冬装" };
+const store = window.localStorage, KEY = "收图验收标记";
+// 判定绑定「路径 + 内容哈希」：换过稿（哈希变了）旧判定自动失效回到待定，不会跟着路径冒充已验。
+const vkey = (it) => it.file + " @" + it.hash;
+
+let saved = {};
+try { saved = JSON.parse(store.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
+
+const list = document.getElementById("list");
+const imgCache = {};
+function loadImg(src) {
+  if (!imgCache[src]) imgCache[src] = new Promise((res, rej) => {
+    const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error("读不到 " + src));
+    im.src = src;
+  });
+  return imgCache[src];
+}
+function toCanvas(im) {
+  const c = document.createElement("canvas");
+  c.width = im.naturalWidth; c.height = im.naturalHeight;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(im, 0, 0);
+  return c;
+}
+// 复刻 widget.js 的 cutOutBackground：从边角取底色，从四边往里洪泛，把容差内的底色挖透明。
+function cutBg(canvas, tolerance) {
+  const w = canvas.width, h = canvas.height;
+  const px = canvas.getContext("2d").getImageData(0, 0, w, h).data;
+  if (!(px[3] > 0)) return new Uint8Array(w * h); // 本来就全透明
+  const bg = [px[0], px[1], px[2]];
+  const near = (p) => Math.max(Math.abs(px[p*4]-bg[0]), Math.abs(px[p*4+1]-bg[1]), Math.abs(px[p*4+2]-bg[2])) <= tolerance;
+  const mask = new Uint8Array(w * h);       // 1 = 人物
+  const seen = new Uint8Array(w * h), stack = new Int32Array(w * h);
+  let top = 0;
+  const push = (p) => { if (!seen[p] && near(p)) { seen[p] = 1; stack[top++] = p; } };
+  for (let x = 0; x < w; x++) { push(x); push((h-1)*w + x); }
+  for (let y = 0; y < h; y++) { push(y*w); push(y*w + w - 1); }
+  while (top) {
+    const p = stack[--top];
+    const x = p % w;
+    if (x > 0) push(p-1); if (x < w-1) push(p+1);
+    if (p >= w) push(p-w); if (p < w*(h-1)) push(p+w);
+  }
+  for (let i = 0; i < w*h; i++) mask[i] = seen[i] ? 0 : (px[i*4+3] > 0 ? 1 : 0);
+  return mask;
+}
+function maskBox(mask, w, h) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+    if (mask[y*w + x]) { if (x<x0) x0=x; if (x>x1) x1=x; if (y<y0) y0=y; if (y>y1) y1=y; }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+function maskCount(mask) { let n = 0; for (let i = 0; i < mask.length; i++) n += mask[i]; return n; }
+function ringCount(mask, w, h, t) {
+  let n = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+    if ((x < t || y < t || x >= w-t || y >= h-t) && mask[y*w + x]) n++;
+  return n;
+}
+function regionDiff(a, b, box, w, h) { // box: 归一化 [l,t,r,b]；返回平均每通道差（0~255）
+  const px = a.getContext("2d").getImageData(0, 0, w, h).data;
+  const qx = b.getContext("2d").getImageData(0, 0, w, h).data;
+  let x0 = Math.floor(box[0]*w), y0 = Math.floor(box[1]*h), x1 = Math.ceil(box[2]*w), y1 = Math.ceil(box[3]*h);
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(w, x1); y1 = Math.min(h, y1);
+  let sum = 0, n = 0;
+  for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) {
+    const i = (y*w + x) * 4;
+    sum += Math.abs(px[i]-qx[i]) + Math.abs(px[i+1]-qx[i+1]) + Math.abs(px[i+2]-qx[i+2]);
+    n += 3;
+  }
+  return n ? sum / n : 0;
+}
+function silhouette(aM, bM, w, h) { // 品红=底图 青=新图
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d"), im = x.createImageData(w, h), d = im.data;
+  for (let i = 0; i < w*h; i++) {
+    const a = aM[i], b = bM[i];
+    if (a && b) { d[i*4] = 40; d[i*4+1] = 30; d[i*4+2] = 50; d[i*4+3] = 255; }
+    else if (a) { d[i*4] = 220; d[i*4+1] = 40; d[i*4+2] = 170; d[i*4+3] = 255; }
+    else if (b) { d[i*4] = 40; d[i*4+1] = 190; d[i*4+2] = 210; d[i*4+3] = 255; }
+    else { d[i*4+3] = 255; }
+  }
+  x.putImageData(im, 0, 0); return c;
+}
+
+INDEX.sort((a, b) =>
+  (CHAR_ORDER[a.char] ?? 9) - (CHAR_ORDER[b.char] ?? 9) ||
+  (OUTFIT_ORDER[a.outfit] ?? 9) - (OUTFIT_ORDER[b.outfit] ?? 9) ||
+  String(a.pose).localeCompare(String(b.pose)));
+
+const state = {};
+for (const it of INDEX) state[vkey(it)] = (it.conflict ? "wait" : saved[vkey(it)]) || "wait";
+
+function flag(cls, text) { return '<span class="flag ' + cls + '">' + text + "</span>"; }
+
+function buildCard(it) {
+  const card = document.createElement("div");
+  card.className = "card" + (it.conflict ? " locked" : "");
+  const pair = PAIR[it.pose] ? '<span class="sub">' + PAIR[it.pose] + " 组</span>" : "";
+  const installed = it.installed ? flag("info", "已装入项目（内容一致）") : "";
+  const registered = it.registered ? flag("info", "已在角色包登记") : "";
+  const picked = it.picked ? flag("ok", "已选稿：来自 " + it.picked) : "";
+  const conflict = it.conflict
+    ? flag("bad", "冲突待选：多个来源内容不同（" + (it.conflictSources || []).map((s) => s.dir + " " + s.hash).join(" / ") + "）")
+    : "";
+  const head = '<span data-meta>' + (conflict + picked + installed + registered) + "</span>" +
+    '<span class="flag info">排队体检…</span>';
+  card.innerHTML =
+    "<h2>" + it.char + " · " + (OUTFIT_NAME[it.outfit] || it.outfit) + " · " + it.pose + pair + "</h2>" +
+    '<div class="flags" data-f>' + head + "</div>" +
+    '<div class="views">' +
+      '<div class="view"><div class="cap">新收的图</div><div class="box"><img data-new src="/' + it.file + '"></div></div>' +
+      '<div class="view"><div class="cap">叠加对比（拖滑块 / 点图闪烁）</div><div class="box" data-blinkbox>' +
+        '<img src="/' + it.base + '"><img class="top" data-top style="clip-path:inset(0 50% 0 0)" src="/' + it.file + '"></div>' +
+        '<input type="range" min="0" max="100" value="50"></div>' +
+      '<div class="view"><div class="cap">轮廓叠影</div><div class="box"><canvas data-sil></canvas></div></div>' +
+    "</div>" +
+    '<div class="verdict">' +
+      '<label class="pass"><input type="radio" name="' + it.file + '" value="pass"><span>通过</span></label>' +
+      '<label class="fail"><input type="radio" name="' + it.file + '" value="fail"><span>退回</span></label>' +
+      '<label><input type="radio" name="' + it.file + '" value="wait" checked><span>待定</span></label>' +
+      '<span class="note" data-note></span>' +
+    "</div>";
+  const [passR, failR, waitR] = card.querySelectorAll("input[type=radio]");
+  const note = card.querySelector("[data-note]");
+  if (it.conflict) {
+    for (const r of [passR, failR, waitR]) r.disabled = true;
+    note.textContent = "冲突待选：请把选中的那张复制进 收图 对应位置覆盖，再重新运行本工具";
+  }
+  const setV = (v, quiet) => {
+    state[vkey(it)] = v;
+    passR.checked = v === "pass"; failR.checked = v === "fail"; waitR.checked = v === "wait";
+    card.classList.toggle("reject", v === "fail");
+    if (!quiet && !it.conflict) { saved[vkey(it)] = v; store.setItem(KEY, JSON.stringify(saved)); refreshSummary(); }
+  };
+  passR.onchange = () => setV("pass"); failR.onchange = () => setV("fail"); waitR.onchange = () => setV("wait");
+  setV(state[vkey(it)], true);
+
+  const box = card.querySelector("[data-blinkbox]");
+  box.onclick = () => box.classList.toggle("blink");
+  const range = card.querySelector("input[type=range]"), top = card.querySelector("[data-top]");
+  range.oninput = () => { top.style.clipPath = "inset(0 " + (100 - range.value) + "% 0 0)"; };
+
+  analyze(it, card).then(() => { card.dataset.done = "1"; });
+  return card;
+}
+
+async function analyze(it, card) {
+  const flags = card.querySelector("[data-f]");
+  const note = card.querySelector("[data-note]");
+  // 元信息徽章（冲突/已选稿/已装入）不随体检结果重画而丢失
+  const meta = card.querySelector("[data-meta]") ? card.querySelector("[data-meta]").innerHTML : "";
+  const put = (html) => { flags.innerHTML = meta + html; };
+  const def = CHARS[it.char];
+  if (!it.baseOk) { put(flag("bad", "找不到底图 " + it.base)); return; }
+  let base, img;
+  try { base = toCanvas(await loadImg("/" + it.base)); img = toCanvas(await loadImg("/" + it.file)); }
+  catch (e) { put(flag("bad", "图片读不出来")); return; }
+  const out = [];
+  if (it.newW == null || it.newH == null) { put(flag("bad", "读不出尺寸，文件可能坏了")); return; }
+  // 1) 尺寸（信息在生成页时就带上了，这里再核一遍）
+  out.push(it.newW === it.baseW && it.newH === it.baseH
+    ? flag("ok", "尺寸 " + it.newW + "×" + it.newH)
+    : flag("bad", "尺寸不对：新 " + it.newW + "×" + it.newH + "，底图 " + it.baseW + "×" + it.baseH));
+  if (it.newW !== it.baseW || it.newH !== it.baseH) { put(out.join("")); return; }
+  const w = base.width, h = base.height;
+  const tol = (def && def.backgroundTolerance) ?? 24;
+  // 2) 白底干净（四边 4 像素一圈不该剩人物）
+  const mask = cutBg(img, tol), baseMask = cutBg(base, tol);
+  const ring = ringCount(mask, w, h, 4), ringArea = (w*h) - (w-8)*(h-8);
+  out.push(ring / ringArea < 0.004
+    ? flag("ok", "白底干净")
+    : flag(ring / ringArea < 0.02 ? "warn" : "bad", "边缘有残留（阴影/水印？）"));
+  // 3) 脸没被重画：脸区差分 vs 身体衣服区差分（衣服变了是正常的，脸不该跟着大变）
+  if (def && def.faceBox) {
+    const face = regionDiff(base, img, def.faceBox, w, h);
+    const bodyBox = [def.faceBox[0], Math.min(0.98, def.faceBox[3] + 0.08), def.faceBox[2], Math.min(0.98, def.faceBox[3] + 0.38)];
+    const body = regionDiff(base, img, bodyBox, w, h);
+    if (face < 10) out.push(flag("ok", "脸和底图一致"));
+    else if (face < body * 0.75) out.push(flag("warn", "脸有小改动（差 " + face.toFixed(1) + "，身上 " + body.toFixed(1) + "）"));
+    else out.push(flag("bad", "脸可能被重画（差 " + face.toFixed(1) + " ≥ 身上 " + body.toFixed(1) + "），细看"));
+  } else out.push(flag("info", "这个角色没有 faceBox，跳过脸部检查"));
+  // 4) 人物位置大小没变：去底后轮廓框四边基本重合
+  const b1 = maskBox(baseMask, w, h), b2 = maskBox(mask, w, h);
+  if (b1 && b2) {
+    const dx = Math.max(Math.abs(b2.x0 - b1.x0), Math.abs(b2.x1 - b1.x1)) / w;
+    const dy = Math.max(Math.abs(b2.y0 - b1.y0), Math.abs(b2.y1 - b1.y1)) / h;
+    const m = Math.max(dx, dy);
+    out.push(m < 0.012
+      ? flag("ok", "位置大小贴合底图")
+      : flag(m < 0.03 ? "warn" : "bad", "轮廓偏移约 " + (m*100).toFixed(1) + "%，位置可能变了"));
+  } else out.push(flag("warn", "没找到人物轮廓"));
+  // 轮廓叠影画上去
+  const sil = card.querySelector("[data-sil]");
+  sil.width = w; sil.height = h;
+  sil.getContext("2d").drawImage(silhouette(baseMask, mask, w, h), 0, 0);
+  // 面积参考：新图人物面积 vs 底图（差太多=整张被改）
+  const a1 = maskCount(baseMask), a2 = maskCount(mask);
+  if (Math.abs(a2 - a1) / a1 > 0.12) out.push(flag("warn", "人物占的画面大小变了 " + (100*(a2-a1)/a1).toFixed(0) + "%"));
+  put(out.join(""));
+  if (!it.conflict) note.textContent = "体检只查四样：尺寸、白底、脸、位置。姿势和衣服要自己看。";
+}
+
+function refreshSummary() {
+  const n = { pass: 0, fail: 0, wait: 0 };
+  let locked = 0;
+  for (const it of INDEX) {
+    if (it.conflict) { locked++; continue; }
+    n[state[vkey(it)]]++;
+  }
+  document.getElementById("summary").innerHTML =
+    "共 " + INDEX.length + " 张　<b class='ok'>通过 " + n.pass + "</b>　<b class='bad'>退回 " + n.fail +
+    "</b>　<b class='wait'>待定 " + n.wait + "</b>" + (locked ? "　<b class='bad'>冲突待选 " + locked + "</b>" : "");
+}
+
+if (!INDEX.length) {
+  list.innerHTML = '<div class="empty">收图文件夹里还没有图。<br>把 GPT 交回的图（保持 角色\\衣服\\文件名 的结构）放进项目里的「收图」文件夹，再双击「双击收图验收.bat」。</div>';
+  refreshSummary();
+} else {
+  for (const it of INDEX) list.appendChild(buildCard(it));
+  refreshSummary();
+}
+
+document.getElementById("allPass").onclick = () => {
+  // 只动"体检已完成"的卡片；冲突待选的不动；人工标了退回的不翻案
+  const keyBySrc = {};
+  for (const it of INDEX) keyBySrc["/" + it.file] = vkey(it);
+  let done = 0;
+  for (const card of list.children) {
+    if (!card.dataset.done) continue;
+    done++;
+    if (card.classList.contains("locked")) continue;
+    if (card.querySelector(".flag.bad") || card.querySelector(".flag.warn")) continue;
+    const vk = keyBySrc[card.querySelector("img[data-new]").getAttribute("src")];
+    if (saved[vk] === "fail") continue;
+    saved[vk] = "pass";
+  }
+  store.setItem(KEY, JSON.stringify(saved));
+  for (const it of INDEX) state[vkey(it)] = (it.conflict ? "wait" : saved[vkey(it)]) || "wait";
+  for (const card of list.children) {
+    const vk = keyBySrc[card.querySelector("img[data-new]").getAttribute("src")];
+    const r = card.querySelectorAll("input[type=radio]");
+    r[0].checked = state[vk] === "pass"; r[1].checked = state[vk] === "fail"; r[2].checked = state[vk] === "wait";
+    card.classList.toggle("reject", state[vk] === "fail");
+  }
+  if (done < INDEX.length) alert("还有 " + (INDEX.length - done) + " 张体检没做完，只处理了做完的部分。");
+  refreshSummary();
+};
+
+document.getElementById("export").onclick = () => {
+  // 判定绑定哈希：装入端会按哈希核对，冲突待选的不导出
+  const out = { 说明: "live2d-mascot 收图验收结果。回到黑窗口运行：node 工具/收图验收.mjs 装入 验收结果.json",
+    生成时间: new Date().toISOString(),
+    结果: INDEX.filter((it) => !it.conflict).map((it) => ({ 角色: it.char, 衣服: it.outfit, 姿势: it.pose, 文件: it.file, 哈希: it.hash, 判定: state[vkey(it)] })) };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "验收结果.json"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+};
+</script>

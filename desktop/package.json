@@ -1,0 +1,14 @@
+{
+  "name": "live2d-desktop-pet",
+  "productName": "桌面看板娘",
+  "private": true,
+  "version": "0.1.0",
+  "main": "main.mjs",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "44.7.0"
+  }
+}

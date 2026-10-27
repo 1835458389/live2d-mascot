@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>看板娘演示 — 模拟一个普通网站</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0;
+    font: 16px/1.7 "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+    color: #1c1e26;
+    background: #f6f7fb;
+  }
+  header {
+    padding: 16px 32px;
+    border-bottom: 1px solid #e4e6ef;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    background: rgba(246,247,251,0.92);
+    backdrop-filter: blur(6px);
+    z-index: 10;
+  }
+  header .brand { font-weight: 700; font-size: 18px; }
+  header nav a { margin-left: 20px; color: #4b4f66; text-decoration: none; font-size: 14px; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 24px 400px; }
+  h1 { font-size: 32px; margin-bottom: 4px; }
+  .lede { color: #565a70; font-size: 17px; margin-top: 0; }
+  section { margin: 40px 0; }
+  h2 { font-size: 21px; border-bottom: 1px solid #e4e6ef; padding-bottom: 8px; }
+  .card {
+    background: #fff;
+    border: 1px solid #e4e6ef;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 16px 0;
+    box-shadow: 0 1px 2px rgba(20,20,40,0.04);
+  }
+  .card ul { margin: 0; padding-left: 20px; }
+  .card li { margin: 4px 0; }
+  .btn {
+    display: inline-block;
+    padding: 9px 16px;
+    background: #4b3fd1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font: inherit;
+    font-size: 15px;
+    cursor: pointer;
+    margin: 6px 8px 6px 0;
+  }
+  .btn.secondary { background: #eceafc; color: #4b3fd1; }
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font: inherit;
+    margin-top: 8px;
+    box-sizing: border-box;
+  }
+  #clickLog {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 13px;
+    background: #10121c;
+    color: #b8e2b8;
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 60px;
+    white-space: pre-wrap;
+    margin-top: 12px;
+  }
+  .selectable {
+    background: #fffbe6;
+    border: 1px dashed #e0c95a;
+    padding: 10px;
+    border-radius: 6px;
+  }
+  footer { text-align: center; color: #9a9db0; font-size: 13px; padding: 40px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">示例网站</div>
+  <nav>
+    <a href="#try" data-mascot-say="这里写着可以和我一起做的事哦～" data-mascot-mood="happy">试试看</a>
+    <a href="#check" data-mascot-say="这一块是检查我有没有挡住网页的。">检查网页</a>
+    <a href="#control" data-mascot-say="用那边的按钮就能指挥我！" data-mascot-mood="surprised">遥控她</a>
+  </nav>
+</header>
+
+<main>
+  <h1>看板娘演示</h1>
+  <p class="lede">
+    这是一个模拟的普通网站。右下角的看板娘只用了一行代码就加进来了。
+    下面列出了可以和她做的事，同时也可以检查网站本身的按钮、输入框、选文字是否都还正常。
+  </p>
+
+  <section id="try">
+    <h2>可以和她做的事</h2>
+    <div class="card">
+      <ul>
+        <li><strong>点她的身体</strong>：她会开心地说一句话。</li>
+        <li><strong>点她的头</strong>：会有不一样的反应。</li>
+        <li><strong>摸头</strong>：把鼠标放在她头上左右来回晃几下，她会害羞脸红。</li>
+        <li><strong>连续快速点她五下</strong>：她会生气，或者被点得头晕。</li>
+        <li><strong>拖动她</strong>：按住她拖到别的地方，她会被吓一跳。</li>
+        <li><strong>放着不管</strong>：三分钟不动鼠标和键盘，她会问你还在不在。</li>
+        <li><strong>整点报时、休息提醒、自己找话说</strong>：到时间会自动出现。</li>
+        <li><strong>右下角的小按钮</strong>：⚙ 设置、🚶 走动、– 最小化、× 关闭。</li>
+        <li><strong>鼠标移到网页上的某些东西上</strong>：比如顶上的三个菜单，她会介绍一句。做网页时给元素加上 <code>data-mascot-say="要说的话"</code> 就行。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="check">
+    <h2>检查网站本身是否正常</h2>
+    <div class="card">
+      <p class="selectable">
+        试着用鼠标选中这段文字。整个网页都应该能正常选文字，包括看板娘所在位置的下方。
+      </p>
+      <button class="btn" onclick="logClick('点击了「主按钮」')">主按钮</button>
+      <button class="btn secondary" onclick="logClick('点击了「次按钮」')">次按钮</button>
+      <label for="apiInput" style="display:block;margin-top:14px"><strong>输入框</strong></label>
+      <input id="apiInput" type="text" placeholder="在这里打字，应该和平时一样正常" />
+      <button class="btn" style="margin-top:10px" onclick="logClick('提交了：' + document.getElementById('apiInput').value)">提交</button>
+      <div id="clickLog">按钮的点击记录会显示在这里……</div>
+    </div>
+  </section>
+
+  <section id="control">
+    <h2>用网页上的按钮遥控她</h2>
+    <div class="card">
+      <p>网站自己的代码也可以控制她，比如让她说指定的话：</p>
+      <button class="btn secondary" onclick="Live2DMascot.say('欢迎来到这个网站！', 'happy')">让她打招呼</button>
+      <button class="btn secondary" onclick="Live2DMascot.say('今天的工作完成了吗？', 'shy')">让她害羞地问一句</button>
+      <button class="btn secondary" onclick="Live2DMascot.setMode('walk')">让她走动</button>
+      <button class="btn secondary" onclick="Live2DMascot.openSettings()">打开设置</button>
+      <br />
+      <button class="btn secondary" onclick="Live2DMascot.minimize()">最小化</button>
+      <button class="btn secondary" onclick="Live2DMascot.restore()">叫她回来</button>
+      <button class="btn secondary" onclick="Live2DMascot.hide()">隐藏</button>
+      <button class="btn secondary" onclick="Live2DMascot.show()">显示</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>一些填充内容，用来测试滚动</h2>
+    <div class="card"><p>第一段：往下滚动，她会一直固定在屏幕右下角，不会跟着网页滚走。</p></div>
+    <div class="card"><p>第二段：继续往下。</p></div>
+    <div class="card"><p>第三段：她就像网站右下角的客服小窗一样。</p></div>
+    <div class="card"><p>第四段：快到底了。</p></div>
+    <div class="card"><p>第五段：到底啦。</p></div>
+  </section>
+</main>
+
+<footer>看板娘挂件演示页面。角色 Hiyori 版权归 Live2D Inc. 所有。</footer>
+
+<script>
+  function logClick(msg) {
+    const log = document.getElementById('clickLog');
+    const time = new Date().toLocaleTimeString();
+    log.textContent = `[${time}] ${msg}\n` + log.textContent;
+  }
+</script>
+
+<!-- 整个看板娘就是这一行 -->
+<script src="../widget.js" data-position="bottom-right" data-scale="1"></script>
+
+</body>
+</html>
