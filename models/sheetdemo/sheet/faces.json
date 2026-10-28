@@ -1,0 +1,90 @@
+{
+  "image": "faces.png",
+  "size": {
+    "w": 1024,
+    "h": 1536
+  },
+  "grid": {
+    "columns": 4
+  },
+  "frames": {
+    "normal": [
+      0,
+      0
+    ],
+    "blink": [
+      1,
+      0
+    ],
+    "talk": [
+      2,
+      0
+    ],
+    "happy": [
+      3,
+      0
+    ],
+    "shy": [
+      0,
+      1
+    ],
+    "angry": [
+      1,
+      1
+    ],
+    "surprised": [
+      2,
+      1
+    ],
+    "face:happy": {
+      "x": 20,
+      "y": 3112,
+      "w": 225,
+      "h": 262,
+      "kind": "patch"
+    },
+    "face:shy": {
+      "x": 275,
+      "y": 3112,
+      "w": 225,
+      "h": 262,
+      "kind": "patch"
+    },
+    "face:angry": {
+      "x": 530,
+      "y": 3112,
+      "w": 225,
+      "h": 262,
+      "kind": "patch"
+    },
+    "eyes:lookLeft": {
+      "x": 785,
+      "y": 3112,
+      "w": 235,
+      "h": 138,
+      "kind": "patch"
+    },
+    "eyes:lookRight": {
+      "x": 1040,
+      "y": 3112,
+      "w": 235,
+      "h": 138,
+      "kind": "patch"
+    },
+    "face:halfBlink": {
+      "x": 1295,
+      "y": 3112,
+      "w": 235,
+      "h": 138,
+      "kind": "patch"
+    },
+    "sleepy": {
+      "x": 20,
+      "y": 3414,
+      "w": 273,
+      "h": 310,
+      "ox": 360,
+      "oy": 14
+    }
+  }
+}

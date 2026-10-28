@@ -267,9 +267,11 @@ try {
     // 拖拽实测：她会走动，容器中心未必是她——用 whoAt 扫出她此刻的位置再抓
     const rect = await evalJs(`(() => { const r = document.documentElement.querySelector('#live2d-mascot-widget').shadowRoot.querySelector('.container').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
     if (!rect) throw new Error("拿不到挂件位置");
-    let pt = null;
-    for (let i = 0; i < 10 && !pt; i++) {
-      pt = await evalJs(`(() => {
+    // 拖拽实测（带重试）：她可能正在走动，单次按空就重扫再试，最多 4 轮
+    let heldOk = false, lastPose = null;
+    for (let attempt = 0; attempt < 4 && !heldOk; attempt++) {
+      if (attempt > 0) await sleep(600);
+      const pt = await evalJs(`(() => {
         const M = window.Live2DMascot;
         const r = ${JSON.stringify(rect)};
         for (let y = r.y + r.height * 0.05; y < r.y + r.height * 0.98; y += 5)
@@ -277,19 +279,17 @@ try {
             if (M.whoAt(x, y) === 'main') return { x: Math.round(x), y: Math.round(y) };
         return null;
       })()`);
-      if (!pt) await sleep(500); // 她可能在走路或过渡帧，稍等再扫
+      if (!pt) continue;
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pt.x, y: pt.y, button: "left", buttons: 1, clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pt.x, y: pt.y - 60, button: "left", buttons: 1 });
+      await sleep(250);
+      const dragging = await evalJs(`Live2DMascot.getOutfit()`);
+      lastPose = dragging && dragging.pose;
+      heldOk = lastPose === "held";
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pt.x, y: pt.y - 60, button: "left", buttons: 0, clickCount: 1 });
+      await sleep(400);
     }
-    if (!pt) {
-      const info = await evalJs(`(() => ({ pose: (window.Live2DMascot.getOutfit() || {}).pose, r: ${JSON.stringify(rect)}, c: window.Live2DMascot.whoAt(${Math.round(rect.x + rect.width / 2)}, ${Math.round(rect.y + rect.height / 2)}) }))()`);
-      throw new Error("whoAt 扫不到她（可能在走路或隐藏）现场=" + JSON.stringify(info));
-    }
-    const x = pt.x, y = pt.y;
-    await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: y - 60, button: "left", buttons: 1 });
-    await sleep(200);
-    const dragging = await evalJs(`Live2DMascot.getOutfit()`);
-    if (!dragging || dragging.pose !== "held") throw new Error("拖拽中 pose=" + (dragging && dragging.pose) + "（应为 held）");
-    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y: y - 60, button: "left", buttons: 0, clickCount: 1 });
+    if (!heldOk) throw new Error("拖拽 4 次都没摆出 held 姿势（最后 pose=" + lastPose + "）");
     // 还原
     await evalJs(`Live2DMascot.setOutfit(null)`);
     await sleep(300);

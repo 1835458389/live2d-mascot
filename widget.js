@@ -540,11 +540,17 @@
   // height, and each picture is held several times over (decoded, cut out, as
   // a texture). Shrink them to what this screen can actually show; at the
   // largest size setting that's still about one picture pixel per screen pixel.
+  // Some embedded browsers report a 0x0 screen: fall back to the window, and
+  // never shrink below 512. Shared by single pictures and sheet frames (a
+  // sheet frame scales by frame height, not by the sheet picture's height).
+  function spriteMax() {
+    const tall = Math.max(screen.height || 0, window.innerHeight || 0);
+    return Math.max(512, Math.round(tall * Math.min(window.devicePixelRatio || 1, 2) * 0.65));
+  }
+
   async function loadSpriteImage(url) {
     const img = await loadImage(url);
-    // some embedded browsers report a 0x0 screen: fall back to the window, and never shrink below 512
-    const tall = Math.max(screen.height || 0, window.innerHeight || 0);
-    const max = Math.max(512, Math.round(tall * Math.min(window.devicePixelRatio || 1, 2) * 0.65));
+    const max = spriteMax();
     if (img.naturalHeight <= max) return img;
     const c = document.createElement("canvas");
     c.width = Math.round((img.naturalWidth * max) / img.naturalHeight);
@@ -553,6 +559,88 @@
     g.imageSmoothingQuality = "high";
     g.drawImage(img, 0, 0, c.width, c.height);
     return c;
+  }
+
+  // ---- Sprite sheets -----------------------------------------------------
+  // A pack may draw its pictures from sheets: def.sheets lists big pictures
+  // with their index JSONs, and an image entry can be a plain path or
+  // { sheet, frame, kind }. Each frame is cut into a stand-alone, full-size
+  // canvas (not a shared PIXI sub-texture -- the sway grid, hit-testing and
+  // face pasting all expect one canvas per name, sized like normal), then
+  // handled exactly like a single picture from there on. Frames carry ox/oy
+  // so trimmed layouts are pasted back onto their standard spot.
+
+  // Load one sheet's picture and index, cut every frame, then drop the big
+  // decoded picture (only the frame canvases stay). One bad frame is skipped
+  // with a warning instead of sinking the whole character.
+  async function loadSheetFrames(def, name) {
+    const s = def.sheets[name];
+    if (!s || !s.image) throw new Error(`live2d-mascot: ${def.id} sheet "${name}" has no image`);
+    const imgP = loadImage(local(s.image));
+    const idxP = s.index
+      ? fetch(local(s.index)).then((r) => {
+          if (!r.ok) throw new Error(`live2d-mascot: ${def.id} sheet "${name}" index HTTP ${r.status}`);
+          return r.json();
+        })
+      : Promise.resolve({ size: s.size, grid: s.grid, frames: s.frames });
+    const [img, idx] = await Promise.all([imgP, idxP]);
+    const fw = idx.size && idx.size.w;
+    const fh = idx.size && idx.size.h;
+    if (!fw || !fh) throw new Error(`live2d-mascot: ${def.id} sheet "${name}" index needs size.w/size.h`);
+    const max = spriteMax();
+    const sc = fh > max ? max / fh : 1;
+    const frames = {};
+    const kinds = {};
+    for (const [fn, fr0] of Object.entries(idx.frames || {})) {
+      try {
+        // grid shorthand [column, row] -> rectangle from the standard size
+        const fr = Array.isArray(fr0)
+          ? { x: fr0[0] * fw, y: fr0[1] * fh, w: fw, h: fh }
+          : fr0;
+        if (!(fr.w > 0 && fr.h > 0) || fr.x < 0 || fr.y < 0 || fr.x + fr.w > img.naturalWidth || fr.y + fr.h > img.naturalHeight) {
+          throw new Error("frame rectangle is outside the picture");
+        }
+        const c = document.createElement("canvas");
+        c.width = Math.round(fw * sc);
+        c.height = Math.round(fh * sc);
+        const g = c.getContext("2d");
+        g.imageSmoothingQuality = "high";
+        g.drawImage(img, fr.x, fr.y, fr.w, fr.h, Math.round((fr.ox || 0) * sc), Math.round((fr.oy || 0) * sc), Math.round(fr.w * sc), Math.round(fr.h * sc));
+        frames[fn] = c;
+        if (fr0 && fr0.kind) kinds[fn] = fr0.kind;
+      } catch (e) {
+        console.warn(`live2d-mascot: ${def.id} sheet "${name}" frame "${fn}" skipped (${e.message})`);
+      }
+    }
+    return { frames, kinds };
+  }
+
+  // Sheets are cut once and shared between the character and the avatar.
+  const sheetCache = new Map(); // sheet image URL -> promise of { frames, kinds }
+  function sheetFramesFor(def, name) {
+    const s = (def.sheets || {})[name];
+    if (!s || !s.image) return Promise.reject(new Error(`live2d-mascot: ${def.id} uses sheet "${name}" but def.sheets doesn't list it`));
+    const key = s.index ? local(s.index) : local(s.image);
+    let p = sheetCache.get(key);
+    if (!p) {
+      p = loadSheetFrames(def, name);
+      sheetCache.set(key, p);
+      p.catch(() => sheetCache.delete(key));
+    }
+    return p;
+  }
+
+  // One image reference -- a plain path, or { sheet, frame } -- to a canvas.
+  // For sheet entries `name` is the default frame name; rejections carry a
+  // ready-made message for the caller's console.warn.
+  async function resolveSpriteSource(def, ref, name) {
+    if (ref && typeof ref === "object" && ref.sheet) {
+      const sh = await sheetFramesFor(def, ref.sheet);
+      const frame = sh && sh.frames[ref.frame || name];
+      if (!frame) throw new Error(`live2d-mascot: ${def.id} sheet "${ref.sheet}" has no frame "${ref.frame || name}"`);
+      return frame;
+    }
+    return loadSpriteImage(local(ref));
   }
 
   // Illustrations (and most AI drawing tools) often come on a plain backdrop.
@@ -658,6 +746,35 @@
     fctx.globalCompositeOperation = "source-in";
     fctx.drawImage(variant, 0, 0, w, h);
     ctx.drawImage(face, 0, 0);
+    return out;
+  }
+
+  // Sheet packs may ship a frame holding just a redrawn face (or eyes) --
+  // far easier for AI tools to draw than a whole-body variant. Stretch the
+  // patch over the given box of the normal picture, with the same soft edge
+  // as pasteFace so the seam doesn't show.
+  function pastePatch(normal, patch, box) {
+    const w = normal.naturalWidth || normal.width;
+    const h = normal.naturalHeight || normal.height;
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext("2d");
+    ctx.drawImage(normal, 0, 0);
+
+    const [x0, y0, x1, y1] = box;
+    const feather = Math.round(Math.min(w, h) * 0.02);
+    const patchC = document.createElement("canvas");
+    patchC.width = w;
+    patchC.height = h;
+    const pctx = patchC.getContext("2d");
+    pctx.filter = `blur(${feather}px)`;
+    pctx.fillStyle = "#fff";
+    pctx.fillRect(x0 * w + feather, y0 * h + feather, (x1 - x0) * w - feather * 2, (y1 - y0) * h - feather * 2);
+    pctx.filter = "none";
+    pctx.globalCompositeOperation = "source-in";
+    pctx.drawImage(patch, x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h);
+    ctx.drawImage(patchC, 0, 0);
     return out;
   }
 
@@ -893,6 +1010,23 @@
     "walk1", "walk2", "walk3", "walk4", "held", "sulk", "cheer1", "cheer2", "focus", "sleepPajamas"];
   const ACTION_FRAMES = ["wave1", "wave2", "drink1", "drink2", "act1", "act2"];
 
+  // What one picture is for (body / face / eyes / pose / patch). An explicit
+  // kind -- on the sheet reference, or on the sheet's frame in the index --
+  // wins; otherwise the name lists above decide, so existing packs keep
+  // behaving exactly as before.
+  function kindOf(name, ref, sheets) {
+    if (ref && typeof ref === "object" && ref.sheet) {
+      if (ref.kind) return ref.kind;
+      const sh = sheets[ref.sheet];
+      const k = sh && sh.kinds[ref.frame || name];
+      if (k) return k;
+    }
+    if (name === "normal") return "body";
+    if (EYE_ONLY.includes(name)) return "eyes";
+    if (POSE_IMAGES.includes(name)) return "pose";
+    return "face";
+  }
+
   // Outfits: put an expression onto a picture in other clothes. Only the
   // pixels where the expression actually differs from the plain face are
   // taken (inside an oval over the face, never the neck), softened at the
@@ -952,19 +1086,51 @@
     const names = Object.keys(def.images || {});
     if (!names.includes("normal")) throw new Error(`live2d-mascot: sprite character "${def.id}" needs images.normal`);
     const raw = {};
-    await Promise.all(names.map(async (name) => (raw[name] = await loadSpriteImage(local(def.images[name])))));
+    // Sheets referenced by images: cut them all up front, so the decoded big
+    // pictures and the cut frames never coexist, and kind lookups stay sync.
+    const sheets = {};
+    await Promise.all(
+      [...new Set(names.filter((n) => def.images[n] && typeof def.images[n] === "object" && def.images[n].sheet).map((n) => def.images[n].sheet))].map(async (s) => {
+        try {
+          sheets[s] = await sheetFramesFor(def, s);
+        } catch (e) {
+          console.warn(e.message);
+        }
+      }),
+    );
+    // A sheet entry whose sheet or frame is missing only drops that one
+    // picture (with a warning); `normal` stays a hard requirement.
+    const drop = [];
+    await Promise.all(
+      names.map(async (name) => {
+        try {
+          raw[name] = await resolveSpriteSource(def, def.images[name], name);
+        } catch (e) {
+          if (name === "normal") throw e;
+          console.warn(`${e.message} -- image "${name}" is skipped`);
+          drop.push(name);
+        }
+      }),
+    );
+    for (const n of drop) names.splice(names.indexOf(n), 1);
+    const kinds = {};
+    for (const name of names) kinds[name] = kindOf(name, def.images[name], sheets);
+    const poseNames = new Set(names.filter((n) => POSE_IMAGES.includes(n) || kinds[n] === "pose"));
     const cut = {};
     for (const name of names) {
-      // Eye-only images (glances, half-blink) take just the eyes when the pack says where they are.
-      const box = EYE_ONLY.includes(name) && def.eyeBox ? def.eyeBox : def.faceBox;
-      const src = name !== "normal" && box && !POSE_IMAGES.includes(name) ? pasteFace(raw.normal, raw[name], box) : raw[name];
+      // Eye pictures (glances, half-blink) take just the eyes when the pack says where they are.
+      const kind = kinds[name];
+      const box = (kind === "eyes" || (kind === "patch" && EYE_ONLY.includes(name))) && def.eyeBox ? def.eyeBox : def.faceBox;
+      let src = raw[name];
+      if (name !== "normal" && box && (kind === "face" || kind === "eyes")) src = pasteFace(raw.normal, raw[name], box);
+      else if (name !== "normal" && box && kind === "patch") src = pastePatch(raw.normal, raw[name], box);
       cut[name] = cutOutBackground(src, tolerance);
     }
     // Let go of what nothing reads again: outfits rebuild faces from the uncut
     // pictures but never need the pose ones, and only `normal` and the poses
     // are hit-tested or measured pixel by pixel.
     for (const name of names) {
-      if (POSE_IMAGES.includes(name)) delete raw[name];
+      if (poseNames.has(name)) delete raw[name];
       else if (name !== "normal") cut[name].pixels = null;
     }
     const base = cut.normal;
@@ -1063,22 +1229,26 @@
     let outfitWanted = null;
     const outfitSets = {};
     async function buildOutfit(name) {
-      const img = await loadSpriteImage(local(def.outfits[name]));
+      // the outfit's body picture: a plain path, or a sheet frame (`frame`
+      // defaults to "normal", the body frame of that sheet)
+      const img = await resolveSpriteSource(def, def.outfits[name], "normal");
       const set = {};
       const ob = cutOutBackground(img, tolerance);
       set.normal = PIXI.Texture.from(ob.canvas);
       for (const n of names) {
-        if (n === "normal" || POSE_IMAGES.includes(n)) continue;
-        const box = EYE_ONLY.includes(n) && def.eyeBox ? def.eyeBox : def.faceBox;
+        if (n === "normal" || poseNames.has(n)) continue;
+        const kind = kinds[n];
+        const box = (kind === "eyes" || (kind === "patch" && EYE_ONLY.includes(n))) && def.eyeBox ? def.eyeBox : def.faceBox;
         if (!box) continue;
-        set[n] = PIXI.Texture.from(cutOutBackground(pasteChanges(raw.normal, raw[n], img, box), tolerance).canvas);
+        const withFace = kind === "patch" ? pastePatch(img, raw[n], box) : pasteChanges(raw.normal, raw[n], img, box);
+        set[n] = PIXI.Texture.from(cutOutBackground(withFace, tolerance).canvas);
         await new Promise((r) => setTimeout(r, 0)); // let the page breathe between pictures
       }
       // Pose pictures drawn in this outfit (def.outfitPoses), placed by the same rules as the usual ones.
       const own = {};
       for (const [n, file] of Object.entries((def.outfitPoses || {})[name] || {})) {
         try {
-          own[n] = cutOutBackground(await loadSpriteImage(local(file)), tolerance);
+          own[n] = cutOutBackground(await resolveSpriteSource(def, file, n), tolerance);
         } catch {
           console.warn(`live2d-mascot: ${def.id} ${name} pose "${n}" didn't load`);
         }
@@ -4811,10 +4981,12 @@
       const def = roster.defs[id];
       avatarCache[id] = null;
       if (def && def.images && def.images.normal) {
-        loadImage(local(def.images.normal))
+        // normal may be a plain path or a sprite-sheet frame; the resolver
+        // warns and rejects on its own, and a missing avatar is fine.
+        resolveSpriteSource(def, def.images.normal, "normal")
           .then((img) => {
-            const w = img.naturalWidth;
-            const h = img.naturalHeight;
+            const w = img.naturalWidth || img.width;
+            const h = img.naturalHeight || img.height;
             const [x0, y0, x1, y1] = def.faceBox || [0.35, 0.02, 0.65, 0.2];
             const size = (x1 - x0) * w * 1.25;
             const cx = ((x0 + x1) / 2) * w;

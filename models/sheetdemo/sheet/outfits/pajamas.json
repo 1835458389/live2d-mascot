@@ -1,0 +1,28 @@
+{
+  "image": "pajamas.png",
+  "size": {
+    "w": 1024,
+    "h": 1536
+  },
+  "grid": {
+    "columns": 2
+  },
+  "frames": {
+    "normal": [
+      0,
+      0
+    ],
+    "held": [
+      1,
+      0
+    ],
+    "wave1": [
+      0,
+      1
+    ],
+    "wave2": [
+      1,
+      1
+    ]
+  }
+}

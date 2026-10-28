@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>拼精灵图工具</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; color: #222; max-width: 960px; }
+  h1 { font-size: 22px; }
+  fieldset { margin: 12px 0; padding: 12px 16px; }
+  label { display: block; margin: 6px 0; }
+  input[type="number"] { width: 80px; }
+  canvas { border: 1px solid #999; image-rendering: pixelated; max-width: 100%; background:
+    repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 24px 24px; }
+  button { font-size: 15px; padding: 6px 18px; margin-right: 12px; }
+  .tip { color: #666; font-size: 13px; }
+  ol { line-height: 1.8; }
+</style>
+</head>
+<body>
+<h1>拼精灵图工具</h1>
+<p class="tip">把一个角色的若干单张 PNG 拼成一张图集（网格排布）+ 一份索引 JSON。全部在本机浏览器里完成，图片不上传。</p>
+
+<fieldset>
+  <legend>第 1 步：选图</legend>
+  <label>选择这个角色的若干张单图（可多选，文件名去掉扩展名就是帧名）：</label>
+  <input type="file" id="files" accept="image/png,image/webp" multiple>
+  <span id="fileCount" class="tip">还没选图</span>
+</fieldset>
+
+<fieldset>
+  <legend>第 2 步：排布设置</legend>
+  <label>标准帧尺寸：宽 <input type="number" id="fw" value="1024"> × 高 <input type="number" id="fh" value="1536">
+    <span class="tip">（填这个角色 normal 的原始像素尺寸；所有帧都会还原成这么大）</span></label>
+  <label>每行列数：<input type="number" id="cols" value="4"> <span class="tip">（留空或填 0 表示自动：排成正方形）</span></label>
+  <label>帧名（换行分隔，顺序和选图顺序对应；留空则用文件名）：</label>
+  <textarea id="names" rows="4" cols="30" placeholder="normal&#10;blink&#10;happy&#10;…"></textarea>
+</fieldset>
+
+<fieldset>
+  <legend>第 3 步：生成与下载</legend>
+  <button id="build">生成图集预览</button>
+  <button id="dlPng" disabled>下载图集 .png</button>
+  <button id="dlJson" disabled>下载索引 .json</button>
+  <div id="msg" class="tip"></div>
+  <canvas id="cv" width="10" height="10"></canvas>
+</fieldset>
+
+<fieldset>
+  <legend>怎么放进角色包</legend>
+  <ol>
+    <li>把下载到的 <b>图集.png</b> 和 <b>图集.json</b> 放进 <code>models/角色名/sheet/</code>（两个文件放同一目录，文件名保持一致）。</li>
+    <li>在角色的 <code>characters/角色名/character.js</code> 里加 <code>sheets</code> 表，例如：<br>
+      <code>sheets: { main: { image: "models/角色名/sheet/图集.png", index: "models/角色名/sheet/图集.json" } }</code></li>
+    <li>把 <code>images</code> 里对应的图改成帧引用，例如：<br>
+      <code>normal: { sheet: "main", frame: "normal" }</code>（frame 省略时默认取键名）。</li>
+    <li>跑一遍 <code>node 工具/精灵图自检.mjs 角色名</code>，PASS 就完工了。</li>
+  </ol>
+</fieldset>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let picked = [];   // [{name, img}]
+let atlas = null;  // {canvas, json}
+
+$("files").addEventListener("change", async (e) => {
+  picked = [];
+  for (const f of e.target.files) {
+    const img = new Image();
+    img.src = URL.createObjectURL(f);
+    await img.decode();
+    picked.push({ name: f.name.replace(/\.[^.]+$/, ""), img });
+  }
+  $("fileCount").textContent = picked.length ? "已选 " + picked.length + " 张：" + picked.map(p => p.name).join("、") : "还没选图";
+});
+
+$("build").addEventListener("click", () => {
+  atlas = null;
+  $("dlPng").disabled = $("dlJson").disabled = true;
+  $("msg").textContent = "";
+  if (!picked.length) { $("msg").textContent = "先选几张图。"; return; }
+  const fw = Number($("fw").value), fh = Number($("fh").value);
+  if (!(fw > 0) || !(fh > 0)) { $("msg").textContent = "标准帧尺寸要填正整数。"; return; }
+  let cols = Number($("cols").value);
+  if (!(cols > 0)) cols = Math.ceil(Math.sqrt(picked.length));
+  const rows = Math.ceil(picked.length / cols);
+  const cv = $("cv");
+  cv.width = cols * fw; cv.height = rows * fh;
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const names = $("names").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const frames = {};
+  picked.forEach((p, i) => {
+    const c = i % cols, r = Math.floor(i / cols);
+    ctx.drawImage(p.img, c * fw, r * fh, fw, fh);
+    frames[names[i] || p.name] = [c, r];
+  });
+  atlas = {
+    json: JSON.stringify({ image: "atlas.png", size: { w: fw, h: fh }, grid: { columns: cols }, frames }, null, 2),
+    canvas: cv,
+  };
+  $("dlPng").disabled = $("dlJson").disabled = false;
+  $("msg").textContent = `拼好了：${cv.width}x${cv.height}，${picked.length} 帧，${cols} 列。预览见下方，确认后点下载。`;
+});
+
+function download(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+$("dlPng").addEventListener("click", () => {
+  if (!atlas) return;
+  atlas.canvas.toBlob((b) => download(b, "atlas.png"), "image/png");
+});
+$("dlJson").addEventListener("click", () => {
+  if (!atlas) return;
+  download(new Blob([atlas.json], { type: "application/json" }), "atlas.json");
+});
+</script>
+</body>
+</html>
