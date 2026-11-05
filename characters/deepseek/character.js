@@ -62,11 +62,15 @@
   // 手工登记的图只要文件放在 models 里，重写时也会被带上。
   outfitPoses: {
     pajamas: {
+      "drink1": "models/deepseek/pajamas/drink1.png",
+      "drink2": "models/deepseek/pajamas/drink2.png",
       "held": "models/deepseek/pajamas/held.png",
       "wave1": "models/deepseek/pajamas/wave1.png",
       "wave2": "models/deepseek/pajamas/wave2.png",
     },
     winter: {
+      "drink1": "models/deepseek/winter/drink1.png",
+      "drink2": "models/deepseek/winter/drink2.png",
       "held": "models/deepseek/winter/held.png",
       "wave1": "models/deepseek/winter/wave1.png",
       "wave2": "models/deepseek/winter/wave2.png",

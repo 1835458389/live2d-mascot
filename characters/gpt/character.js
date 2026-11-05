@@ -52,11 +52,15 @@
   // 手工登记的图只要文件放在 models 里，重写时也会被带上。
   outfitPoses: {
     pajamas: {
+      "drink1": "models/gpt/pajamas/drink1.png",
+      "drink2": "models/gpt/pajamas/drink2.png",
       "held": "models/gpt/pajamas/held.png",
       "wave1": "models/gpt/pajamas/wave1.png",
       "wave2": "models/gpt/pajamas/wave2.png",
     },
     winter: {
+      "drink1": "models/gpt/winter/drink1.png",
+      "drink2": "models/gpt/winter/drink2.png",
       "held": "models/gpt/winter/held.png",
       "wave1": "models/gpt/winter/wave1.png",
       "wave2": "models/gpt/winter/wave2.png",
