@@ -186,6 +186,13 @@ try {
     const ids = (Array.isArray(got) ? got : []).map((c) => (typeof c === "string" ? c : c && (c.id ?? c.name))).filter(Boolean);
     if (ids.length) chars = ids;
   } catch {}
+  // 切到当前人物会按设计返回 false：把当前人物挪到最后，保证每一步都是真切换
+  let current = null;
+  try {
+    current = await evalJs("(JSON.parse(localStorage.getItem('live2d-mascot-settings') || 'null') || {}).character || null");
+  } catch {}
+  if (!current) current = chars[0];
+  if (chars.includes(current)) chars = [...chars.filter((c) => c !== current), current];
   for (const c of chars) {
     await step(`setCharacter(${c})`, () => evalJs(`Live2DMascot.setCharacter(${JSON.stringify(c)})`));
   }
