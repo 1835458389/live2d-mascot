@@ -630,6 +630,28 @@
     return p;
   }
 
+  // Let go of cut frames nobody reads any more (pose frames especially --
+  // buildSprite drops its own copies of those to save memory). `keep` lists,
+  // per sheet, the frames to hold on to (the avatar's face picture).
+  function releaseSheets(def, sheetNames, keep = {}) {
+    for (const name of sheetNames) {
+      const s = (def.sheets || {})[name];
+      if (!s || !s.image) continue;
+      const key = s.index ? local(s.index) : local(s.image);
+      const p = sheetCache.get(key);
+      if (!p) continue;
+      const want = keep[name] || [];
+      if (!want.length) {
+        sheetCache.delete(key);
+        continue;
+      }
+      const slim = p.then((sh) => ({ frames: Object.fromEntries(want.filter((f) => sh.frames[f]).map((f) => [f, sh.frames[f]])), kinds: sh.kinds }));
+      slim.catch(() => sheetCache.delete(key));
+      sheetCache.set(key, slim);
+    }
+  }
+  const sheetRefs = (refs) => [...new Set(refs.filter((r) => r && typeof r === "object" && r.sheet).map((r) => r.sheet))];
+
   // One image reference -- a plain path, or { sheet, frame } -- to a canvas.
   // For sheet entries `name` is the default frame name; rejections carry a
   // ready-made message for the caller's console.warn.
@@ -1136,6 +1158,11 @@
     const base = cut.normal;
     const textures = {};
     for (const name of names) textures[name] = PIXI.Texture.from(cut[name].canvas);
+    // Everything is cut and on the GPU: drop the shared sheet frames, keeping
+    // only the one the avatar draws from. (Not-used-by-sheets packs: no-op.)
+    const nref = def.images.normal;
+    const keepFrames = nref && typeof nref === "object" && nref.sheet ? { [nref.sheet]: [nref.frame || "normal"] } : {};
+    releaseSheets(def, Object.keys(sheets), keepFrames);
 
     const { width: W, height: H, bbox } = base;
     const footX = (bbox.minX + bbox.maxX) / 2;
@@ -1260,6 +1287,8 @@
         const src = own[n] ? n : own[POSE_FROM[n]] ? POSE_FROM[n] : null;
         if (src) outfitPoses[n] = makePose(n, PIXI.Texture.from(own[src].canvas), own[src], at[n]);
       }
+      // this outfit's sheet frames are on the GPU now too
+      releaseSheets(def, sheetRefs([def.outfits[name], ...Object.values((def.outfitPoses || {})[name] || {})]), keepFrames);
       return { textures: set, base: ob, poses: outfitPoses };
     }
     let dressPoses = {}; // pose pictures of the outfit being worn
@@ -1460,7 +1489,7 @@
         dress = name ? outfitSets[name].textures : textures;
         dressBase = name ? outfitSets[name].base : base;
         dressPoses = name ? outfitSets[name].poses : {};
-        if (pose !== "stand" && !dressPoses[pose] && !poses[pose]) pose = "stand";
+        if (pose !== "stand" && !poseOf(pose)) pose = "stand";
         sprite.texture = dress.normal;
         showPose();
       },
@@ -3344,19 +3373,22 @@
     // Bedtime (settings.bedTime / wakeTime, in hours): she goes to sleep at bedtime and
     // sleeps through the night; after the wake-up time, the first sign of you wakes her.
     let nightOff = null; // the night you sent her back to being awake
+    // The wake-up hour; 7 (the default setting) if the stored value is unusable.
+    function wakeHour() {
+      const w = Number(settings.wakeTime);
+      return Number.isFinite(w) ? w : 7;
+    }
     function inNight(d) {
       if (settings.bedTime === "off" || settings.bedTime == null) return false;
       const bed = Number(settings.bedTime);
-      const wake = Number(settings.wakeTime);
+      const wake = wakeHour();
       const h = d.getHours() + d.getMinutes() / 60;
       return bed > wake ? h >= bed || h < wake : h >= bed && h < wake;
     }
     // Which night it is: the date it started on.
     function nightKey(d) {
-      let wake = Number(settings.wakeTime);
-      if (!Number.isFinite(wake)) wake = 7; // default wake time (settings.wakeTime fallback)
       const start = new Date(d);
-      if (d.getHours() < wake + 1) start.setDate(start.getDate() - 1);
+      if (d.getHours() < wakeHour() + 1) start.setDate(start.getDate() - 1);
       return start.toDateString();
     }
     function stepBedtime(d) {
@@ -4269,7 +4301,8 @@
         }
       }
       // --- what she can do --- (anchored: a plain question like 「微信怎么用」 must go to the AI)
-      if (/^(?:帮助|指令|命令|怎么用|你会什么|你能做什么|你会干什么|有什么功能|有哪些功能)[?？!！。]*$/.test(t.replace(/\s+/g, ""))) {
+      // (a trailing 一下 or particle is fine: 「帮助一下」「你会什么呀」)
+      if (/^(?:帮助|指令|命令|怎么用|你会什么|你能做什么|你会干什么|有什么功能|有哪些功能)(?:一下)?[呀呢吗啊嘛哦喔~～]*[?？!！。]*$/.test(t.replace(/\s+/g, ""))) {
         sayInTurn([
           { event: "helpIntro" },
           // the bubble shows the exact words to type; the voice reads a spoken version
@@ -4423,22 +4456,30 @@
       // A riddle is running: only text that matched no command above counts as
       // a guess (or giving up), so other local commands still work mid-riddle.
       if (game && game.kind === "riddle") {
-        const clean = t.replace(/[\s，。、！？!?,.:：;；~～·"'’“”()（）\-]+/g, "");
-        if (/不知道|放弃|答案|猜不出|告诉我/.test(t)) {
-          const ans = game.answers[0];
-          game = null;
-          sayInTurn([{ event: "riddleGiveUp" }, { text: `答案是「${ans}」。` }]);
-          return true;
-        }
-        // digits must match exactly (so "18" never answers "8"); words also accept a lead-in like 「是月亮」
-        const hit = game.answers.some((a) => {
-          const as = a.replace(/[\s，。、！？!?,.:：;；~～·"'’“”()（）\-]+/g, "");
-          return clean === as || (!/^\d+$/.test(as) && clean.endsWith(as));
-        });
+        const PUNCT = /[\s，。、！？!?,.:：;；~～·"'’“”()（）\-]+/g;
+        // 「是月亮吧」「月亮吗」: drop the trailing particles before comparing
+        const clean = t.replace(PUNCT, "").replace(/[吧吗嘛呢啊呀哦喔啦咯嗯]+$/, "");
+        const negated = /不是|才不|并不|不对/.test(clean); // 「不是月亮」 is not a guess of 月亮
+        const nums = clean.match(/\d+/g) || [];
+        // Digits: any number in the sentence equal to the answer (「答案是8」 yes, 「18」 never answers "8").
+        // Words: the whole guess, or a lead-in like 「是月亮」「我猜是月亮」.
+        const hit =
+          !negated &&
+          game.answers.some((a) => {
+            const as = a.replace(PUNCT, "");
+            return /^\d+$/.test(as) ? nums.includes(as) : clean === as || clean.endsWith(as);
+          });
         if (hit) {
           game = null;
           react("riddleRight");
           gainAffection(1, "riddle", 0);
+          return true;
+        }
+        // checked after the answer: 「答案是8」 is a guess, not giving up
+        if (/不知道|放弃|答案|猜不出|告诉我/.test(t)) {
+          const ans = game.answers[0];
+          game = null;
+          sayInTurn([{ event: "riddleGiveUp" }, { text: `答案是「${ans}」。` }]);
           return true;
         }
         game.tries++;

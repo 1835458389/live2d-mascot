@@ -306,6 +306,11 @@ function install(jsonPath) {
     const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
     const bak = charFile + ".备份" + stamp;
     if (!exists(bak)) fs.copyFileSync(charFile, bak);
+    // 备份只留最近 2 份（时间戳同长，按名字排序就是按时间排序）
+    const bakDir = path.dirname(charFile);
+    const bakPrefix = path.basename(charFile) + ".备份";
+    const olds = fs.readdirSync(bakDir).filter((n) => n.startsWith(bakPrefix) && /^\d{14}$/.test(n.slice(bakPrefix.length))).sort();
+    for (const n of olds.slice(0, -2)) fs.rmSync(path.join(bakDir, n), { force: true });
     fs.writeFileSync(charFile, next);
     console.log(`  ${role}: outfitPoses 登记 ${installed.pajamas.length + installed.winter.length} 条（睡衣 ${installed.pajamas.length}，冬装 ${installed.winter.length}）——已执行核对生效`);
   }
