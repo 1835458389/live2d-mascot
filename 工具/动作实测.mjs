@@ -173,6 +173,8 @@ async function dragHeld() {
 
 async function runCell(char, outfit, name) {
   const def = ACTIONS[name];
+  // 0) 假装有人在电脑前：无头浏览器一直没动静，跑到后面她会自动打瞌睡、睡着，睡着时不做动作
+  await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift" }))`).catch(() => {});
   // 1) 确认角色（切换进行中会返回 false，带重试）
   if (((await evalJs(`(window.Live2DMascot.getOutfit()||{}).id`))) !== char) {
     let swapped = false;
