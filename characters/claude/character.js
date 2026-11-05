@@ -60,6 +60,8 @@
     },
     winter: {
       "held": "models/claude/winter/held.png",
+      "wave1": "models/claude/winter/wave1.png",
+      "wave2": "models/claude/winter/wave2.png",
     },
   },
   backgroundTolerance: 24,

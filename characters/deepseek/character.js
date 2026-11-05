@@ -68,6 +68,8 @@
     },
     winter: {
       "held": "models/deepseek/winter/held.png",
+      "wave1": "models/deepseek/winter/wave1.png",
+      "wave2": "models/deepseek/winter/wave2.png",
     },
   },
   // 白色背景会被自动去掉。数值越大去得越多，太大会把她身上的白色也去掉。

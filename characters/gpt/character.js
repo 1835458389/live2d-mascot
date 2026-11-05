@@ -58,6 +58,8 @@
     },
     winter: {
       "held": "models/gpt/winter/held.png",
+      "wave1": "models/gpt/winter/wave1.png",
+      "wave2": "models/gpt/winter/wave2.png",
     },
   },
   // 她是白发白裙白翅膀，站在白色背景上，所以去背景要非常保守，
