@@ -23,6 +23,19 @@ const TYPES = {
   ".md": "text/plain; charset=utf-8",
 };
 
+// 按真实路径认 配置.json：Windows 下「配置.json::$DATA」（备用数据流）、8.3 短名「配置~1.JSO」、
+// 大小写不同都指向同一个文件，只比请求里的文件名会被绕过。正常路径里不会有冒号，直接拒绝。
+function isSecretFile(rel, file) {
+  if (rel.includes(":")) return true;
+  let real = file;
+  try {
+    real = fs.realpathSync.native(file);
+  } catch {
+    // 文件不存在：后面照常 404
+  }
+  return path.basename(real).toLowerCase() === "配置.json";
+}
+
 const server = http.createServer((req, res) => {
   let rel;
   try {
@@ -38,7 +51,7 @@ const server = http.createServer((req, res) => {
   }
   if (rel.endsWith("/")) file = path.join(file, "index.html");
   // 配置.json 里有 MiniMax 密钥，不能通过网络提供给别的程序。
-  if (path.basename(file).toLowerCase() === "配置.json") {
+  if (isSecretFile(rel, file)) {
     res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" }).end("这个文件不能通过网络访问");
     return;
   }

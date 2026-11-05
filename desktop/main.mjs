@@ -25,6 +25,19 @@ let win = null;
 let tray = null;
 let windowWatcher = null;
 
+// 按真实路径认 配置.json：Windows 下「配置.json::$DATA」（备用数据流）、8.3 短名「配置~1.JSO」、
+// 大小写不同都指向同一个文件，只比请求里的文件名会被绕过。正常路径里不会有冒号，直接拒绝。
+function isSecretFile(rel, file) {
+  if (rel.includes(":")) return true;
+  let real = file;
+  try {
+    real = fs.realpathSync.native(file);
+  } catch {
+    // 文件不存在：后面照常处理
+  }
+  return path.basename(real).toLowerCase() === "配置.json";
+}
+
 function servePetFile(request) {
   let rel;
   try {
@@ -35,7 +48,7 @@ function servePetFile(request) {
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep)) return new Response("forbidden", { status: 403 });
   // 配置.json 里有 MiniMax 密钥，只留在主进程里，页面不能读到。
-  if (path.basename(file).toLowerCase() === "配置.json") return new Response("forbidden", { status: 403 });
+  if (isSecretFile(rel, file)) return new Response("forbidden", { status: 403 });
   // Audio elements ask for byte ranges; file:// fetches ignore that and some
   // clips then fail to decode. Answer range requests ourselves.
   const range = request.headers.get("range");
