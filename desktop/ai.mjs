@@ -30,7 +30,7 @@ async function post(url, headers, body, ms = 40000) {
   }
 }
 
-const NO_KEY = { error: "还没有填写 MiniMax 密钥（voice/配置.json）" };
+const NO_KEY = { error: "还没有填写 MiniMax 密钥（设置 → AI 里填）" };
 
 function explain(err) {
   if (err && err.name === "AbortError") return { error: "网络太慢，等不到回复" };

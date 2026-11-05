@@ -297,6 +297,62 @@ function startSayServer() {
 // Chat with MiniMax; the key stays in this process.
 const ai = createAI(ROOT);
 ipcMain.handle("pet:chat", (_event, payload) => ai.chat(payload || {}));
+
+// Settings → AI: the page can set the key, address and chat model, but only ever
+// learns whether a key is saved. Other fields in the file (the voice model the
+// voice tool uses, etc.) are kept as they are.
+const CONFIG_FILE = path.join(ROOT, "voice", "配置.json");
+function readConfigFile() {
+  try {
+    const c = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    return c && typeof c === "object" ? c : {};
+  } catch {
+    return {};
+  }
+}
+ipcMain.handle("pet:config-get", () => {
+  const c = readConfigFile();
+  return { hasKey: typeof c.apiKey === "string" && c.apiKey.trim() !== "", host: String(c.host || ""), chatModel: String(c.chatModel || "") };
+});
+ipcMain.handle("pet:config-set", (_event, p) => {
+  p = p && typeof p === "object" ? p : {};
+  const c = readConfigFile();
+  if (p.clearKey) delete c.apiKey;
+  else if (typeof p.apiKey === "string" && p.apiKey.trim()) {
+    const key = p.apiKey.trim();
+    if (key.length > 4096 || /\s/.test(key)) return { error: "密钥格式不对：不能有空格或换行" };
+    c.apiKey = key;
+  }
+  if (typeof p.host === "string") {
+    const h = p.host.trim().replace(/\/+$/, "");
+    if (!h) delete c.host;
+    else if (!/^https:\/\/[\w.-]+(:\d+)?(\/[\w./-]*)?$/.test(h)) return { error: "接口地址要以 https:// 开头，比如 https://api.minimax.cn" };
+    else c.host = h;
+  }
+  if (typeof p.chatModel === "string") {
+    const m = p.chatModel.trim();
+    if (!m) delete c.chatModel;
+    else if (!/^[\w.:-]{1,80}$/.test(m)) return { error: "模型名里只能有字母、数字和 . - _ :" };
+    else c.chatModel = m;
+  }
+  try {
+    fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(c, null, 2) + "\n");
+  } catch (err) {
+    return { error: "保存失败：" + String(err && err.message).slice(0, 60) };
+  }
+  return { ok: true };
+});
+// One very short exchange to see whether the key and address work.
+ipcMain.handle("pet:config-test", () =>
+  ai.chat({ system: "这是连接测试。只回复两个字：收到", messages: [{ role: "user", content: "测试" }] })
+);
+ipcMain.handle("pet:autostart-get", () => app.getLoginItemSettings(loginItemOptions()).openAtLogin);
+ipcMain.handle("pet:autostart-set", (_event, on) => {
+  app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: !!on });
+  refreshTray();
+  return app.getLoginItemSettings(loginItemOptions()).openAtLogin;
+});
 ipcMain.handle("pet:speak", (_event, payload) => ai.speak(payload || {}));
 
 ipcMain.on("pet:tray-icon", (_event, dataUrl) => {

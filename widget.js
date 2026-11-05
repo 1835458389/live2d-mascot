@@ -356,6 +356,8 @@
       outfit: "auto",
       bedTime: "off",
       wakeTime: "7",
+      bubbleSize: "m",
+      replyLength: "normal",
     };
   }
 
@@ -1281,6 +1283,11 @@
         }
         await new Promise((r) => setTimeout(r, 0));
       }
+      // put away (character switched) while this was being built: nothing to dress any more
+      if (gone) {
+        for (const k in set) set[k].destroy(true);
+        return null;
+      }
       const at = poseAnchors(Object.assign({}, cut, own));
       const outfitPoses = {};
       for (const n in at) {
@@ -1292,6 +1299,7 @@
       return { textures: set, base: ob, poses: outfitPoses };
     }
     let dressPoses = {}; // pose pictures of the outfit being worn
+    let gone = false; // destroy() has run
     // The picture shown for a pose: the outfit's own when it has one.
     const poseOf = (n) => dressPoses[n] || poses[n];
     let pose = "stand";
@@ -1478,14 +1486,16 @@
         outfitWanted = name;
         if (name && !outfitSets[name]) {
           try {
-            outfitSets[name] = await buildOutfit(name);
+            const built = await buildOutfit(name);
+            if (!built) return; // she was put away meanwhile
+            outfitSets[name] = built;
           } catch (err) {
             console.warn(err.message);
             outfitWanted = prev; // roll back so she isn't stuck "wearing" it; retry next time
             return;
           }
         }
-        if (outfitWanted !== name) return; // changed again while it was being built
+        if (gone || outfitWanted !== name) return; // put away, or changed again while it was being built
         dress = name ? outfitSets[name].textures : textures;
         dressBase = name ? outfitSets[name].base : base;
         dressPoses = name ? outfitSets[name].poses : {};
@@ -1503,6 +1513,7 @@
       headDrop: () => (pose === "stand" ? 0 : standHead.top - poseOf(pose).top),
       visibleExtents: () => ({ left: footX - bbox.minX, right: bbox.maxX - footX, top: footY - bbox.minY }),
       destroy() {
+        gone = true;
         PIXI.Ticker.shared.remove(tick);
         view.destroy({ children: true });
         for (const name of names) textures[name].destroy(true);
@@ -1646,6 +1657,51 @@
           overscroll-behavior: contain;
           box-sizing: border-box;
         }
+        .ph-av { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; background: #e9e5fb; box-shadow: 0 0 0 2px #fff, 0 0 0 3px #e3dff3; flex: none; }
+        .ph-av:not([src]) { visibility: hidden; width: 0; box-shadow: none; }
+        .ph-who { flex: 1; display: flex; flex-direction: column; line-height: 1.25; margin-left: 10px; }
+        .ph-who small { font-size: 11px; font-weight: 400; color: #9f99b8; }
+        .card { background: #faf9fe; border: 1px solid #efecf8; border-radius: 12px; padding: 4px 10px 10px; margin-bottom: 8px; }
+        .card > .sec:first-child, .card > .switch:first-child { margin-top: 4px; }
+        .card .switch:last-child { border-bottom: none; }
+        .card .bond { background: #fff; }
+        .tab { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 0 3px; }
+        .tab b { font-size: 15px; font-weight: 400; line-height: 1.2; }
+        .field {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 6px 9px;
+          border: 1px solid #ddd8ee;
+          border-radius: 8px;
+          font: 12px/1.4 system-ui, "Microsoft YaHei", sans-serif;
+          color: #2b2540;
+          background: #fff;
+          outline: none;
+        }
+        .field:focus { border-color: #7a6edc; box-shadow: 0 0 0 3px rgba(122,110,220,0.15); }
+        .btn-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .btn {
+          border: 1px solid #ddd8ee;
+          background: #fff;
+          color: #4a4466;
+          border-radius: 8px;
+          padding: 5px 10px;
+          font: 12px system-ui, "Microsoft YaHei", sans-serif;
+          cursor: pointer;
+          white-space: nowrap;
+          flex: none;
+          width: auto;
+        }
+        .btn:hover { background: #f6f4fd; }
+        .btn.primary { background: #7a6edc; border-color: #7a6edc; color: #fff; }
+        .btn.primary:hover { background: #6a5dd0; }
+        .btn.danger { color: #c0475e; margin-left: auto; }
+        .btn:disabled { opacity: 0.55; cursor: default; }
+        .cfg-msg { margin-top: 6px; min-height: 16px; }
+        .cfg-msg.ok { color: #2f9a6a; }
+        .cfg-msg.err { color: #c0475e; }
+        .key-state.ok { color: #2f9a6a; }
+        .key-state.missing { color: #c0475e; }
         .panel-head {
           display: flex;
           justify-content: space-between;
@@ -1952,28 +2008,36 @@
         <div class="bubble"><span class="shown"></span><span class="rest"></span></div>
         <div class="panel ui" hidden>
           <div class="panel-head">
-            <span class="ph-title">看板娘设置</span>
+            <img class="ph-av" alt="" />
+            <div class="ph-who"><b class="ph-name">看板娘设置</b><small class="ph-sub">设置会自动保存</small></div>
             <button class="panel-close" title="关闭设置">×</button>
           </div>
           <div class="tabs">
-            <button class="tab" data-tab="who">人物</button>
-            <button class="tab" data-tab="life">日常</button>
-            <button class="tab" data-tab="talk">声音和聊天</button>
-            <button class="tab" data-tab="move">动作</button>
+            <button class="tab" data-tab="who"><b>👤</b>人物</button>
+            <button class="tab" data-tab="life"><b>🏠</b>日常</button>
+            <button class="tab" data-tab="move"><b>✨</b>动作</button>
+            <button class="tab" data-tab="talk"><b>🔊</b>声音</button>
+            <button class="tab desktop-only" data-tab="ai" hidden><b>🔑</b>AI</button>
           </div>
 
           <section class="page" data-page="who">
-            <div class="sec">主人物</div>
-            <div class="avatars" data-pick="character"></div>
-            <div class="bond"></div>
-            <div class="sec">同伴 <span class="hint">可以和她是同一个人</span></div>
-            <div class="avatars small" data-pick="buddy"></div>
-            <div class="sec">第二位同伴</div>
-            <div class="avatars small" data-pick="buddy2"></div>
-            <div class="sec">衣服</div>
-            <div class="seg" data-pick="outfit"></div>
-            <div class="sec">大小 <span class="val size-val"></span></div>
-            <input type="range" min="0.6" max="1.6" step="0.1" data-k="size" />
+            <div class="card">
+              <div class="sec">主人物</div>
+              <div class="avatars" data-pick="character"></div>
+              <div class="bond"></div>
+            </div>
+            <div class="card">
+              <div class="sec">同伴 <span class="hint">可以和她是同一个人</span></div>
+              <div class="avatars small" data-pick="buddy"></div>
+              <div class="sec">第二位同伴</div>
+              <div class="avatars small" data-pick="buddy2"></div>
+            </div>
+            <div class="card">
+              <div class="sec">衣服</div>
+              <div class="seg" data-pick="outfit"></div>
+              <div class="sec">大小 <span class="val size-val"></span></div>
+              <input type="range" min="0.6" max="1.6" step="0.1" data-k="size" />
+            </div>
             <select data-k="character" hidden></select>
             <select data-k="buddy" hidden></select>
             <select data-k="buddy2" hidden></select>
@@ -1986,14 +2050,19 @@
           </section>
 
           <section class="page" data-page="life" hidden>
-            <label class="switch"><input type="checkbox" data-k="autoWander" /><span>自己四处走动</span></label>
-            <label class="switch"><input type="checkbox" data-k="hourly" /><span>整点报时<small>含吃饭、熬夜提醒</small></span></label>
-            <label class="switch"><input type="checkbox" data-k="effects" /><span>小特效和待机小动作</span></label>
-            <label class="switch desktop-only" hidden><input type="checkbox" data-k="watchApps" /><span>让她知道我在用什么程序<small>只在这台电脑上判断，不会发出去</small></span></label>
-            <div class="sec">晚上自动睡觉 <span class="hint">到点抱着枕头睡，夜里动鼠标也不醒</span></div>
-            <div class="seg" data-pick="bedTime"></div>
-            <div class="sec">起床时间 <span class="hint">过了这个点，你一动她就醒</span></div>
-            <div class="seg" data-pick="wakeTime"></div>
+            <div class="card">
+              <label class="switch"><input type="checkbox" data-k="autoWander" /><span>自己四处走动</span></label>
+              <label class="switch"><input type="checkbox" data-k="hourly" /><span>整点报时<small>含吃饭、熬夜提醒</small></span></label>
+              <label class="switch"><input type="checkbox" data-k="effects" /><span>小特效和待机小动作</span></label>
+              <label class="switch desktop-only" hidden><input type="checkbox" data-k="watchApps" /><span>让她知道我在用什么程序<small>只在这台电脑上判断，不会发出去</small></span></label>
+              <label class="switch desktop-only" hidden><input type="checkbox" class="autostart" /><span>开机自动启动<small>Windows 启动后她自己出来</small></span></label>
+            </div>
+            <div class="card">
+              <div class="sec">晚上自动睡觉 <span class="hint">夜里动鼠标也不醒</span></div>
+              <div class="seg" data-pick="bedTime"></div>
+              <div class="sec">起床时间 <span class="hint">过了这个点，你一动她就醒</span></div>
+              <div class="seg" data-pick="wakeTime"></div>
+            </div>
             <select data-k="bedTime" hidden>
               <option value="off" data-short="关">不自动睡</option>
               <option value="22" data-short="22:00">晚上 10 点</option>
@@ -2007,10 +2076,12 @@
               <option value="8" data-short="8:00">早上 8 点</option>
               <option value="9" data-short="9:00">早上 9 点</option>
             </select>
-            <div class="sec">休息提醒</div>
-            <div class="seg" data-pick="restMinutes"></div>
-            <div class="sec">说话频率</div>
-            <div class="seg" data-pick="chatter"></div>
+            <div class="card">
+              <div class="sec">休息提醒</div>
+              <div class="seg" data-pick="restMinutes"></div>
+              <div class="sec">说话频率</div>
+              <div class="seg" data-pick="chatter"></div>
+            </div>
             <select data-k="restMinutes" hidden>
               <option value="0" data-short="关">关闭</option>
               <option value="30" data-short="30 分">每 30 分钟</option>
@@ -2027,19 +2098,59 @@
           </section>
 
           <section class="page" data-page="talk" hidden>
-            <label class="switch"><input type="checkbox" data-k="voice" /><span>说话出声</span></label>
-            <div class="sec">音量 <span class="val volume-val"></span></div>
-            <input type="range" min="0" max="1" step="0.05" data-k="volume" />
-            <div class="chat-only" hidden>
-              <label class="switch"><input type="checkbox" data-k="chatVoice" /><span>聊天的回答也读出来<small>会用 MiniMax 额度</small></span></label>
-              <div class="sec">主动找你聊天 <span class="hint">用 AI，会用额度</span></div>
-              <div class="seg" data-pick="aiChatter"></div>
-              <select data-k="aiChatter" hidden>
-                <option value="off" data-short="关闭">关闭</option>
-                <option value="rare" data-short="偶尔" title="约 2 小时一次">偶尔</option>
-                <option value="often" data-short="常常" title="约 40 分钟一次">常常</option>
+            <div class="card">
+              <label class="switch"><input type="checkbox" data-k="voice" /><span>说话出声</span></label>
+              <div class="sec">音量 <span class="val volume-val"></span></div>
+              <input type="range" min="0" max="1" step="0.05" data-k="volume" />
+            </div>
+            <div class="card">
+              <div class="sec">气泡文字大小</div>
+              <div class="seg" data-pick="bubbleSize"></div>
+              <select data-k="bubbleSize" hidden>
+                <option value="s" data-short="小">小</option>
+                <option value="m" data-short="中">中</option>
+                <option value="l" data-short="大">大</option>
+                <option value="xl" data-short="特大">特大</option>
               </select>
-              <div class="memory">
+            </div>
+            <p class="hint web-only">AI 聊天只有桌面版才有。</p>
+          </section>
+
+          <section class="page" data-page="ai" hidden>
+            <div class="card key-card">
+              <div class="sec">MiniMax 密钥 <span class="key-state hint"></span></div>
+              <input class="field key-input" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴新的密钥（不会显示出来）" />
+              <div class="sec">接口地址 <span class="hint">一般不用改</span></div>
+              <input class="field host-input" type="text" spellcheck="false" placeholder="https://api.minimax.cn" />
+              <div class="sec">聊天模型 <span class="hint">一般不用改</span></div>
+              <input class="field model-input" type="text" spellcheck="false" placeholder="MiniMax-M3.1-Flash-Preview" />
+              <div class="btn-row">
+                <button class="btn primary cfg-save">保存</button>
+                <button class="btn cfg-test" title="发一句很短的话试试，会用一点点额度">测试连接</button>
+                <button class="btn danger key-clear">删除密钥</button>
+              </div>
+              <div class="cfg-msg hint"></div>
+              <p class="hint">密钥只保存在这台电脑上（voice 文件夹里的 配置.json），由桌面程序读取，页面看不到，也不会被打包或上传。</p>
+            </div>
+            <div class="chat-only" hidden>
+              <div class="card">
+                <div class="sec">她回答的长短</div>
+                <div class="seg" data-pick="replyLength"></div>
+                <select data-k="replyLength" hidden>
+                  <option value="short" data-short="简短" title="一两句话">简短</option>
+                  <option value="normal" data-short="正常" title="一到三句话">正常</option>
+                  <option value="long" data-short="多说点" title="可以多说几句，用的额度也多一些">多说点</option>
+                </select>
+                <label class="switch"><input type="checkbox" data-k="chatVoice" /><span>聊天的回答也读出来<small>会用 MiniMax 额度</small></span></label>
+                <div class="sec">主动找你聊天 <span class="hint">用 AI，会用额度</span></div>
+                <div class="seg" data-pick="aiChatter"></div>
+                <select data-k="aiChatter" hidden>
+                  <option value="off" data-short="关闭">关闭</option>
+                  <option value="rare" data-short="偶尔" title="约 2 小时一次">偶尔</option>
+                  <option value="often" data-short="常常" title="约 40 分钟一次">常常</option>
+                </select>
+              </div>
+              <div class="card memory">
                 <details>
                   <summary>⏰ 提醒（<span class="rem-count">0</span> 个）</summary>
                   <ul class="rem-list"></ul>
@@ -2051,10 +2162,10 @@
                 <button class="mem-clear">清空记忆和聊天记录</button>
               </div>
             </div>
-            <p class="hint web-only">AI 聊天只有桌面版才有。</p>
           </section>
 
           <section class="page" data-page="move" hidden>
+            <div class="card">
             <div class="sec">点一下，让她做个动作</div>
             <div class="act-btns">
               <button data-act="wave"><b>👋</b>挥手</button>
@@ -2066,6 +2177,8 @@
               <button data-act="yawn"><b>🥱</b>打哈欠</button>
               <button data-act="hum"><b>🎵</b>哼歌</button>
             </div>
+            </div>
+            <div class="card">
             <div class="sec">让她保持一个状态 <span class="hint">一直保持，直到你取消</span></div>
             <div class="act-btns holds">
               <button data-hold="sit"><b>🪑</b>坐下</button>
@@ -2080,6 +2193,7 @@
               <button data-hold="sleepy"><b>🥱</b>犯困</button>
             </div>
             <button class="hold-end" hidden>↩ 恢复正常</button>
+            </div>
           </section>
 
           <div class="panel-foot">
@@ -2129,6 +2243,8 @@
       bubbleRest: q(".bubble .rest"),
       panel: q(".panel"),
       panelClose: q(".panel-close"),
+      phAv: q(".ph-av"),
+      phName: q(".ph-name"),
       characterSelect: q('select[data-k="character"]'),
       sizeVal: q(".size-val"),
       bond: q(".bond"),
@@ -3942,7 +4058,7 @@
         ...(memory.notes.length
           ? ["你记得关于用户的这些事（在自然的时候提起就好，不要每次都提，也不要像背书一样念出来）：\n- " + memory.notes.join("\n- ")]
           : []),
-        "回答要求：用口语化的简体中文，像面对面说话；一般一到三句话，最多八十个字；不要用 Markdown、列表、表情符号或颜文字，因为你的话会被念出来；可以用「……」表达停顿。",
+        `回答要求：用口语化的简体中文，像面对面说话；${{ short: "一两句话，最多四十个字", long: "可以多说几句，最多一百六十个字" }[settings.replyLength] || "一般一到三句话，最多八十个字"}；不要用 Markdown、列表、表情符号或颜文字，因为你的话会被念出来；可以用「……」表达停顿。`,
         "回答的最前面，先用方括号写出你此刻的表情，只能是这几个之一：[开心] [害羞] [生气] [吃惊] [困] [平静]。例如：[开心]今天也辛苦啦！",
         "用户要你做做不到的事（比如操作电脑、上网查资料）时，坦白说做不到，但可以陪他聊聊。",
       ].join("\n");
@@ -4877,6 +4993,74 @@
     }
 
     if (config.desktop) panel.querySelectorAll(".desktop-only").forEach((el) => (el.hidden = false));
+    applyBubbleSize();
+
+    // AI tab (desktop): the key is only ever sent to the main process, never read back.
+    const D = config.desktop || {};
+    const aiEl = (c) => panel.querySelector(c);
+    const cfgMsg = (text, kind) => {
+      const el = aiEl(".cfg-msg");
+      el.textContent = text || "";
+      el.className = "cfg-msg hint" + (kind ? " " + kind : "");
+    };
+    async function refreshAiTab() {
+      if (!D.getConfig) return;
+      const c = await D.getConfig().catch(() => null);
+      const st = aiEl(".key-state");
+      if (!c) {
+        st.textContent = "读不到设置";
+        st.className = "key-state hint missing";
+        return;
+      }
+      st.textContent = c.hasKey ? "✓ 已填写" : "还没填写，AI 聊天用不了";
+      st.className = "key-state hint " + (c.hasKey ? "ok" : "missing");
+      aiEl(".key-clear").disabled = !c.hasKey;
+      if (document.activeElement !== aiEl(".host-input")) aiEl(".host-input").value = c.host || "";
+      if (document.activeElement !== aiEl(".model-input")) aiEl(".model-input").value = c.chatModel || "";
+    }
+    if (D.getConfig) {
+      panel.addEventListener("click", async (e) => {
+        const t = e.target.closest && e.target.closest(".cfg-save, .cfg-test, .key-clear, .tab");
+        if (!t) return;
+        if (t.classList.contains("tab")) {
+          if (t.dataset.tab === "ai") refreshAiTab();
+          return;
+        }
+        if (t.classList.contains("cfg-save")) {
+          const key = aiEl(".key-input").value.trim();
+          const r = await D.setConfig({ apiKey: key || undefined, host: aiEl(".host-input").value, chatModel: aiEl(".model-input").value }).catch((err) => ({ error: String(err && err.message) }));
+          if (r && r.error) cfgMsg(r.error, "err");
+          else {
+            aiEl(".key-input").value = "";
+            cfgMsg(key ? "已保存。可以点「测试连接」试一下。" : "已保存。", "ok");
+          }
+          refreshAiTab();
+        } else if (t.classList.contains("key-clear")) {
+          if (!confirm("确定删除这台电脑上保存的 MiniMax 密钥吗？删除后 AI 聊天就用不了了。")) return;
+          const r = await D.setConfig({ clearKey: true }).catch(() => ({ error: "删除失败" }));
+          cfgMsg(r && r.error ? r.error : "密钥已删除。", r && r.error ? "err" : "ok");
+          refreshAiTab();
+        } else if (t.classList.contains("cfg-test")) {
+          t.disabled = true;
+          cfgMsg("正在试……");
+          const r = await D.testConfig().catch(() => ({ error: "没有回应" }));
+          t.disabled = false;
+          if (r && r.text) cfgMsg("连接正常，她回了一句：" + String(r.text).slice(0, 30), "ok");
+          else cfgMsg("没连上：" + ((r && r.error) || "不知道为什么"), "err");
+        }
+      });
+    }
+
+    // Start with Windows (desktop): a system setting, not part of the saved settings.
+    const autoBox = panel.querySelector(".autostart");
+    if (D.getAutoStart && autoBox) {
+      D.getAutoStart().then((on) => (autoBox.checked = !!on), () => {});
+      autoBox.addEventListener("change", () => {
+        D.setAutoStart(autoBox.checked).then((on) => (autoBox.checked = !!on), () => {});
+      });
+    } else if (autoBox) {
+      autoBox.closest(".switch").remove();
+    }
     if (canChat) panel.querySelectorAll(".web-only").forEach((el) => (el.hidden = true));
 
     if (canChat) {
@@ -5041,6 +5225,7 @@
             avatarCache[id] = c.toDataURL("image/jpeg", 0.85);
             panel.querySelectorAll(`img[data-av="${id}"]`).forEach((el) => (el.src = avatarCache[id]));
             if (dom.chatAv.dataset.av === id) dom.chatAv.src = avatarCache[id];
+            if (dom.phAv.dataset.av === id) dom.phAv.src = avatarCache[id];
           })
           .catch(() => {});
       }
@@ -5111,6 +5296,17 @@
       dom.sizeVal.textContent = Math.round(settings.size * 100) + "%";
       renderCompanionOptions();
       panel.querySelectorAll("[data-act]").forEach((b) => (b.hidden = !canDoAction(b.dataset.act)));
+      if (character) {
+        dom.phName.textContent = (character.def.name || character.def.id) + " 的设置";
+        const av = avatarFor(character.def.id);
+        if (av) dom.phAv.src = av;
+        else dom.phAv.removeAttribute("src");
+        dom.phAv.dataset.av = character.def.id;
+        const b = bond();
+        const lv = Math.max(0, Math.min(levelOf(b.points), AFFECTION_LEVELS.length - 1));
+        panel.querySelector(".ph-sub").textContent = `❤ ${AFFECTION_LEVELS[lv].name} · 认识 ${Math.max(1, b.days)} 天`;
+      }
+      if (!panel.hidden && tabNow === "ai") refreshAiTab();
       panel.querySelectorAll("[data-hold]").forEach((b) => {
         b.hidden = !canHold(b.dataset.hold);
         b.classList.toggle("on", !!hold && hold.kind === b.dataset.hold);
@@ -5120,8 +5316,14 @@
       dom.volumeVal.textContent = Math.round(settings.volume * 100) + "%";
     }
 
+    function applyBubbleSize() {
+      const px = { s: 12, m: 14, l: 16, xl: 19 }[settings.bubbleSize] || 14;
+      bubble.style.fontSize = px + "px";
+      bubble.style.maxWidth = Math.round(240 * (px / 14)) + "px";
+    }
     function applySetting(k) {
       if (k === "size") layout();
+      if (k === "bubbleSize") applyBubbleSize();
       if (k === "restMinutes") restAnchor = Date.now();
       if (k === "chatter") scheduleChatter();
       if (k === "aiChatter") scheduleAiChatter();

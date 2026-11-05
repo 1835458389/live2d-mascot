@@ -15,4 +15,10 @@ contextBridge.exposeInMainWorld("petDesktop", {
   // AI chat through MiniMax (the key stays in the main process).
   chat: (payload) => ipcRenderer.invoke("pet:chat", payload),
   speak: (payload) => ipcRenderer.invoke("pet:speak", payload),
+  // Settings → AI: write the key / address / model (never read the key back), test the connection.
+  getConfig: () => ipcRenderer.invoke("pet:config-get"),
+  setConfig: (p) => ipcRenderer.invoke("pet:config-set", p),
+  testConfig: () => ipcRenderer.invoke("pet:config-test"),
+  getAutoStart: () => ipcRenderer.invoke("pet:autostart-get"),
+  setAutoStart: (on) => ipcRenderer.invoke("pet:autostart-set", !!on),
 });

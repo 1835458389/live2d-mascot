@@ -139,7 +139,8 @@ try {
     } else if (msg.method === "Runtime.exceptionThrown") {
       const d = msg.params.exceptionDetails;
       const text = d.exception?.description || d.exception?.value || d.text || "未知异常";
-      pageErrors.push(text.split("\n")[0]);
+      // 留下前几行调用位置，偶发错误才查得到出处
+      pageErrors.push(text.split("\n").slice(0, 5).join("\n    "));
     } else if (msg.method === "Log.entryAdded" && msg.params.entry.level === "error") {
       // 资源加载失败已由 Network.responseReceived 带着具体 URL 记录，这里不再重复
       if (!/Failed to load resource/.test(msg.params.entry.text)) {

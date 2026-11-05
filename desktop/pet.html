@@ -18,6 +18,11 @@
       onForeground: (fn) => petDesktop.onForeground(fn),
       chat: (payload) => petDesktop.chat(payload),
       speak: (payload) => petDesktop.speak(payload),
+      getConfig: () => petDesktop.getConfig(),
+      setConfig: (p) => petDesktop.setConfig(p),
+      testConfig: () => petDesktop.testConfig(),
+      getAutoStart: () => petDesktop.getAutoStart(),
+      setAutoStart: (on) => petDesktop.setAutoStart(on),
     },
   };
 
