@@ -54,16 +54,22 @@
   // 手工登记的图只要文件放在 models 里，重写时也会被带上。
   outfitPoses: {
     pajamas: {
+      "cheer1": "models/claude/pajamas/cheer1.png",
+      "cheer2": "models/claude/pajamas/cheer2.png",
       "drink1": "models/claude/pajamas/drink1.png",
       "drink2": "models/claude/pajamas/drink2.png",
       "held": "models/claude/pajamas/held.png",
+      "sit": "models/claude/pajamas/sit.png",
       "wave1": "models/claude/pajamas/wave1.png",
       "wave2": "models/claude/pajamas/wave2.png",
     },
     winter: {
+      "cheer1": "models/claude/winter/cheer1.png",
+      "cheer2": "models/claude/winter/cheer2.png",
       "drink1": "models/claude/winter/drink1.png",
       "drink2": "models/claude/winter/drink2.png",
       "held": "models/claude/winter/held.png",
+      "sit": "models/claude/winter/sit.png",
       "wave1": "models/claude/winter/wave1.png",
       "wave2": "models/claude/winter/wave2.png",
     },
