@@ -207,6 +207,11 @@ async function runCell(char, outfit, name) {
   const avail = outfit === "base"
     ? Object.keys((await evalJs(`(window.Live2DMascotCharacters||{})[${JSON.stringify(char)}] || {}`)).images || {})
     : (await evalJs(`window.Live2DMascot.getOutfit().poses`)) || [];
+  // 睡衣没有单独的 sleep 时，程序会用底表里的 sleepPajamas（和 widget 的 poseFits 同一条规则）
+  if (outfit === "pajamas" && !avail.includes("sleep")
+      && (await evalJs(`!!(((window.Live2DMascotCharacters||{})[${JSON.stringify(char)}]||{}).images||{}).sleepPajamas`))) {
+    avail.push("sleepPajamas");
+  }
   const missing = def.frames.filter((f) => !avail.includes(f));
   if (missing.length === def.frames.length) {
     return { 状态: "跳过", 原因: "无图（缺 " + def.frames.join("/") + "）" };
