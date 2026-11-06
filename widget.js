@@ -1515,13 +1515,18 @@
       destroy() {
         gone = true;
         PIXI.Ticker.shared.remove(tick);
+        // Note the outfit pose pictures first: once the view is destroyed, a bent
+        // picture (sitting) can't even report its texture any more. sit and
+        // sitGround share one, hence the set.
+        const poseTextures = new Set();
+        for (const k in outfitSets) for (const n in outfitSets[k].poses) {
+          const t = outfitSets[k].poses[n] && outfitSets[k].poses[n].obj && outfitSets[k].poses[n].obj.texture;
+          if (t) poseTextures.add(t);
+        }
         view.destroy({ children: true });
         for (const name of names) textures[name].destroy(true);
         for (const k in outfitSets) for (const n in outfitSets[k].textures) outfitSets[k].textures[n].destroy(true);
-        for (const k in outfitSets) for (const n in outfitSets[k].poses) {
-          const t = outfitSets[k].poses[n] && outfitSets[k].poses[n].obj && outfitSets[k].poses[n].obj.texture;
-          if (t) t.destroy(true);
-        }
+        for (const t of poseTextures) t.destroy(true);
       },
     };
   }
