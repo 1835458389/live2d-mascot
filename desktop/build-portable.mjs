@@ -44,6 +44,9 @@ const APP = path.join(OUT, "resources", "app");
 const SKIP = [
   path.join("voice", "配置.json"), // the MiniMax key stays on this computer
   path.join("voice", "试听"),
+  // the sprite-sheet test character: only the self-checks load it
+  path.join("characters", "sheetdemo"),
+  path.join("models", "sheetdemo"),
   path.join("voice", "generate.mjs"),
   path.join("voice", ".gitignore"),
   path.join("desktop", "node_modules"),
