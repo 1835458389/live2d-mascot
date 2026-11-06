@@ -1974,6 +1974,9 @@
         .memory { margin: 8px 0; font-size: 12px; color: #6a6385; }
         .memory summary { cursor: pointer; }
         .memory ul { margin: 6px 0; padding-left: 18px; max-height: 120px; overflow: auto; }
+        .diary ul { max-height: 220px; padding-left: 4px; list-style: none; }
+        .diary li { margin-bottom: 8px; line-height: 1.5; }
+        .diary li b { color: #4b4466; font-weight: 600; }
         .mem-clear {
           margin-top: 4px;
           border: 1px solid #e6c9d2;
@@ -2061,6 +2064,13 @@
               <label class="switch"><input type="checkbox" data-k="effects" /><span>小特效和待机小动作</span></label>
               <label class="switch desktop-only" hidden><input type="checkbox" data-k="watchApps" /><span>让她知道我在用什么程序<small>只在这台电脑上判断，不会发出去</small></span></label>
               <label class="switch desktop-only" hidden><input type="checkbox" class="autostart" /><span>开机自动启动<small>Windows 启动后她自己出来</small></span></label>
+            </div>
+            <div class="card memory diary">
+              <details>
+                <summary>📔 陪伴日记（<span class="diary-count">0</span> 篇）</summary>
+                <ul class="diary-list"></ul>
+              </details>
+              <div class="hint">每天和你待得最久的那位写一篇，只存在这台电脑上。聊天里说「日记」或「昨天的日记」，她会念给你听。</div>
             </div>
             <div class="card">
               <div class="sec">晚上自动睡觉 <span class="hint">夜里动鼠标也不醒</span></div>
@@ -2266,6 +2276,8 @@
       chatClose: q(".chat-close"),
       memCount: q(".mem-count"),
       memList: q(".mem-list"),
+      diaryList: q(".diary-list"),
+      diaryCount: q(".diary-count"),
       memClear: q(".mem-clear"),
       remCount: q(".rem-count"),
       remList: q(".rem-list"),
@@ -2843,9 +2855,146 @@
 
     // The single entry point for "something happened, respond to it".
     const warnedMoodRules = new Set();
+
+    // -----------------------------------------------------------------
+    // Companion diary (陪伴日记): small counts per day, kept on this computer.
+    // Once a day is over, the character who spent the most time with you
+    // that day writes one short entry from it, in her own words (lines.diary in
+    // the pack, else default-lines.js). No AI needed. It shows in settings →
+    // 日常, and the chat words 「日记」「昨天的日记」 make her read it out.
+    // -----------------------------------------------------------------
+    const DIARY_KEY = "live2d-mascot-diary";
+    const DIARY_DAYS = 60;
+    const diary = (() => {
+      try {
+        const d = JSON.parse(localStorage.getItem(DIARY_KEY) || "{}");
+        return d && typeof d.days === "object" && d.days ? d : { days: {} };
+      } catch {
+        return { days: {} };
+      }
+    })();
+    let diaryDirty = false;
+    window.addEventListener("pagehide", saveDiary);
+    const dayKey = (d = new Date()) =>
+      d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    function diaryToday() {
+      const k = dayKey();
+      return diary.days[k] || (diary.days[k] = { active: 0, focus: 0, chats: 0, pats: 0, touches: 0, games: 0, reminders: 0, by: {} });
+    }
+    function diaryAdd(field, n = 1) {
+      const t = diaryToday();
+      t[field] = (t[field] || 0) + n;
+      diaryDirty = true;
+    }
+    function saveDiary() {
+      if (!diaryDirty) return;
+      diaryDirty = false;
+      const keys = Object.keys(diary.days).sort();
+      for (const k of keys.slice(0, Math.max(0, keys.length - DIARY_DAYS))) delete diary.days[k];
+      try {
+        localStorage.setItem(DIARY_KEY, JSON.stringify(diary));
+      } catch {
+        // no room; today's counts stay in memory
+      }
+    }
+    // Which reactions count toward the diary.
+    function diaryNoteEvent(base) {
+      if (base === "tapHead") diaryAdd("pats");
+      else if (base === "tap" || base === "tooManyTaps" || base === "tapSulky" || base.startsWith("touch")) diaryAdd("touches");
+      else if (/^(rpsWin|rpsLose|rpsDraw|riddleRight|riddleGiveUp|coinHeads|coinTails)$/.test(base)) diaryAdd("games");
+      else if (base === "reminderDue" || base === "reminderLate") diaryAdd("reminders");
+    }
+    function diaryLines(id) {
+      const def = roster.defs[id];
+      const own = def && def.lines && def.lines.diary;
+      return Object.assign({}, roster.defaultLines.diary || {}, own || {});
+    }
+    // Same day → same wording, so an entry doesn't change each time it's shown.
+    function seededPick(list, seed) {
+      if (!isLineList(list)) return "";
+      let h = 0;
+      for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      return list[h % list.length];
+    }
+    function spanText(ms) {
+      const min = Math.round(ms / 60000);
+      if (min < 60) return min + "分钟";
+      return Math.floor(min / 60) + "小时" + (min % 60 ? (min % 60) + "分钟" : "");
+    }
+    function diaryWriter(t) {
+      let best = null;
+      for (const id in t.by || {}) if (roster.defs[id] && (!best || t.by[id] > t.by[best])) best = id;
+      return best;
+    }
+    // Returns { writer, text } for a day, or null when there's nothing to write.
+    function composeDiary(key) {
+      const t = diary.days[key];
+      if (!t) return null;
+      if (t.text) return { writer: t.writer, text: t.text };
+      const writer = diaryWriter(t) || (character && character.def.id);
+      if (!writer) return null;
+      const L = diaryLines(writer);
+      const fill = (group, vars) => {
+        let s = seededPick(L[group], key + group);
+        for (const k in vars) s = s.split("{" + k + "}").join(vars[k]);
+        return s;
+      };
+      const busy = t.focus + t.chats + t.pats + t.touches + t.games + t.reminders;
+      if (t.active < 60000 && !busy) return null;
+      const parts = [];
+      parts.push(t.active >= 5 * 60000 ? fill("together", { 时长: spanText(t.active) }) : fill("quiet", {}));
+      if (t.focus >= 60000) parts.push(fill("focus", { 分钟: Math.round(t.focus / 60000) }));
+      if (t.chats) parts.push(fill("chat", { 次: t.chats }));
+      if (t.pats) parts.push(fill("pat", { 次: t.pats }));
+      if (t.touches) parts.push(fill("touch", { 次: t.touches }));
+      if (t.games) parts.push(fill("game", { 次: t.games }));
+      if (t.reminders) parts.push(fill("reminder", { 次: t.reminders }));
+      parts.push(fill("close", {}));
+      const text = parts.filter(Boolean).join("");
+      if (!text) return null;
+      // A finished day is written once and kept as is.
+      if (key < dayKey()) {
+        t.text = text;
+        t.writer = writer;
+        diaryDirty = true;
+        saveDiary();
+      }
+      return { writer, text };
+    }
+    function diaryDateLabel(key) {
+      const [, mo, da] = key.split("-").map(Number);
+      return mo + " 月 " + da + " 日";
+    }
+    function renderDiary() {
+      if (!dom.diaryList) return;
+      const keys = Object.keys(diary.days).sort().reverse();
+      dom.diaryList.innerHTML = "";
+      let n = 0;
+      for (const k of keys) {
+        const e = composeDiary(k);
+        if (!e) continue;
+        n++;
+        const li = document.createElement("li");
+        const who = roster.defs[e.writer];
+        const head = document.createElement("b");
+        head.textContent = (k === dayKey() ? "今天（还没写完）" : diaryDateLabel(k)) + (who ? " · " + who.name : "");
+        li.appendChild(head);
+        li.appendChild(document.createElement("br"));
+        li.appendChild(document.createTextNode(e.text));
+        dom.diaryList.appendChild(li);
+      }
+      dom.diaryCount.textContent = String(n);
+      if (!n) {
+        const li = document.createElement("li");
+        li.textContent = "还没有日记。和她一起待一会儿，就会写下第一篇。";
+        dom.diaryList.appendChild(li);
+      }
+    }
+
     function react(event, vars = {}) {
       if (!character) return null;
       const base = event.startsWith("greeting.") ? "greeting" : event;
+      diaryNoteEvent(base);
       const r = Object.assign({}, DEFAULT_REACTIONS[base], character.def.reactions && character.def.reactions[base]);
       if (r.chance != null && Math.random() > r.chance) return null;
 
@@ -3939,6 +4088,14 @@
         }
       }
       noteNewDay();
+      // Diary: time together (only while you're at the computer) and focus time.
+      if (idleFor < AWAY_MS) {
+        const t = diaryToday();
+        diaryAdd("active", 10000);
+        t.by[character.def.id] = (t.by[character.def.id] || 0) + 10000;
+      }
+      if (focusing()) diaryAdd("focus", 10000);
+      if (m % 2 === 0 && d.getSeconds() < 10) saveDiary();
 
       // At most one line per tick; anything else that's due waits for the next tick.
       let spoke = stepBedtime(d);
@@ -4128,6 +4285,7 @@
       const text = dom.chatInput.value.trim();
       if (!text || chatBusy || !character) return;
       pushChat("me", text);
+      diaryAdd("chats");
       if (handleLocal(text)) {
         dom.chatInput.value = "";
         return;
@@ -4429,6 +4587,16 @@
           // the bubble shows the exact words to type; the voice reads a spoken version
           ...(window.Live2DMascotHelp || []).map((h) => ({ text: h.text, voice: h.say })),
         ]);
+        return true;
+      }
+
+      // --- diary --- 「日记」「今天的日记」「念一下昨天的日记」
+      const diaryAsk = /^(?:我想|我要)?(?:看看?|读读?|念念?|看一下|读一下|念一下|给我看看?)?(今天|昨天)?(?:的)?(?:陪伴)?日记(?:吧|呢)?[呀呢吗啊嘛哦~～?？!！。]*$/.exec(t);
+      if (diaryAsk) {
+        const key = diaryAsk[1] === "昨天" ? dayKey(new Date(Date.now() - 86400000)) : dayKey();
+        const e = composeDiary(key);
+        const by = e && e.writer !== character.def.id && roster.defs[e.writer] ? "这是" + roster.defs[e.writer].name + "写的：" : "";
+        say(e ? by + e.text : diaryAsk[1] === "昨天" ? "昨天没有日记……我们好像没怎么在一起。" : "今天还没什么可写的。再陪我一会儿吧。", { priority: 3 });
         return true;
       }
 
@@ -5388,6 +5556,8 @@
         dom.chatBox.hidden = true;
         renderBond();
         renderReminders();
+        saveDiary();
+        renderDiary();
       }
       if (!panel.hidden) renderPanel();
     });
@@ -5418,6 +5588,8 @@
     });
 
     function destroy() {
+      saveDiary();
+      window.removeEventListener("pagehide", saveDiary);
       clearInterval(schedulerTimer);
       window.removeEventListener("resize", layout);
       window.removeEventListener("pointermove", onPointerMove);

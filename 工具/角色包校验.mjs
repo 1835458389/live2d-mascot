@@ -98,11 +98,14 @@ for (const name of list) {
   const dir = path.join(root, "characters", name);
   if (!fs.existsSync(dir)) problems.push([name, "名单里有「" + name + "」，但 characters/ 下没有这个文件夹"]);
 }
+// sheetdemo 是精灵图格式的测试角色，只有自检会加载，故意不进名单
+const TEST_ONLY = new Set(["sheetdemo"]);
 for (const entry of fs.readdirSync(path.join(root, "characters"), { withFileTypes: true })) {
-  if (entry.isDirectory() && !list.includes(entry.name)) {
+  if (entry.isDirectory() && !list.includes(entry.name) && !TEST_ONLY.has(entry.name)) {
     problems.push([entry.name, "characters/ 下有文件夹「" + entry.name + "」，但不在 index.js 名单里"]);
   }
 }
+for (const [name, why] of problems) log(`✗ FAIL ${name}: ${why}`);
 
 for (const name of list) {
   const errs = [];
