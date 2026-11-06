@@ -117,6 +117,8 @@ try {
   serveChild = await startServe(root);
   log(`本地服务已启动: ${URL_BASE}`);
 
+  // 每次从干净的浏览器资料开始：上一轮留下的提醒、设置、好感度会在这一轮突然冒出来，干扰断言
+  fs.rmSync(path.join(root, "工具", ".自检-临时用户目录"), { recursive: true, force: true });
   browserProc = spawn(browser, [
     "--headless=new",
     `--remote-debugging-port=${DEBUG_PORT}`,
@@ -243,7 +245,18 @@ try {
   }
 
   // 附加：say 与 getAffection
-  await step(`say("自检测试","happy")`, () => evalJs(`Live2DMascot.say("自检测试","happy")`));
+  // say 被更要紧的话挡住时会按设计返回 false：失败时把她当时在说的话记下来
+  await step(`say("自检测试","happy")`, async () => {
+    const r = await evalJs(`(() => {
+      if (Live2DMascot.say("自检测试", "happy")) return true;
+      const host = [...document.querySelectorAll("*")].find((e) => e.shadowRoot);
+      const b = host && host.shadowRoot.querySelector(".bubble");
+      window.__sayBlockedBy = b && b.classList.contains("show") ? b.textContent : "（没有气泡）";
+      return false;
+    })()`);
+    if (!r) log("    say 没说出口，当时她在说：" + (await evalJs("window.__sayBlockedBy")));
+    return r;
+  });
   await step(`getAffection()`, async () => {
     const a = await evalJs(`Live2DMascot.getAffection()`);
     if (!a || typeof a.points !== "number" || typeof a.level !== "number" || a.level < 0) return false;
