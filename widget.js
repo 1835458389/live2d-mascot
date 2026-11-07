@@ -671,6 +671,29 @@
   // Flood-fill it away from the border so lines inside her stop the fill,
   // then feather the light fringe so no halo is left. Also returns the
   // bounding box of what remains and an alpha mask for hit-testing.
+  // A canvas's pixels are only given back when it's garbage collected, which
+  // can take a while (and a whole picture is several MB). Shrinking it to
+  // nothing frees them at once. Only for canvases made here as scratch work.
+  function freeCanvas(c) {
+    if (c && c.getContext) {
+      c.width = 0;
+      c.height = 0;
+    }
+  }
+
+  // The face box of a picture, cut out on its own canvas: all an outfit needs
+  // from an expression picture (see pasteChanges' variantIsCrop).
+  function cropBox(img, box) {
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    const [x0, y0, x1, y1] = [box[0] * w, box[1] * h, box[2] * w, box[3] * h].map(Math.round);
+    const c = document.createElement("canvas");
+    c.width = x1 - x0;
+    c.height = y1 - y0;
+    c.getContext("2d").drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+    return c;
+  }
+
   function cutOutBackground(img, tolerance) {
     const w = img.naturalWidth || img.width;
     const h = img.naturalHeight || img.height;
@@ -741,7 +764,11 @@
       maxX = w - 1;
       maxY = h - 1;
     }
-    return { canvas, width: w, height: h, pixels: px, bbox: { minX, minY, maxX, maxY } };
+    // Keep only the alpha channel (a quarter of the RGBA copy): hit-testing
+    // and head finding only ever ask how solid a pixel is. Index: y * w + x.
+    const alpha = new Uint8Array(w * h);
+    for (let p = 0; p < w * h; p++) alpha[p] = px[p * 4 + 3];
+    return { canvas, width: w, height: h, pixels: alpha, bbox: { minX, minY, maxX, maxY } };
   }
 
   // AI tools redraw the whole picture for every expression, so hair and
@@ -770,6 +797,7 @@
     fctx.globalCompositeOperation = "source-in";
     fctx.drawImage(variant, 0, 0, w, h);
     ctx.drawImage(face, 0, 0);
+    freeCanvas(face);
     return out;
   }
 
@@ -799,6 +827,7 @@
     pctx.globalCompositeOperation = "source-in";
     pctx.drawImage(patch, x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h);
     ctx.drawImage(patchC, 0, 0);
+    freeCanvas(patchC);
     return out;
   }
 
@@ -1055,22 +1084,26 @@
   // pixels where the expression actually differs from the plain face are
   // taken (inside an oval over the face, never the neck), softened at the
   // edge, so a new scarf or earmuffs right next to the face stay intact.
-  function pasteChanges(normal, variant, target, box) {
+  function pasteChanges(normal, variant, target, box, variantIsCrop = false) {
     const w = normal.naturalWidth || normal.width;
     const h = normal.naturalHeight || normal.height;
     const [x0, y0, x1, y1] = [box[0] * w, box[1] * h, box[2] * w, box[3] * h].map(Math.round);
     const bw = x1 - x0;
     const bh = y1 - y0;
-    const read = (img) => {
+    const read = (img, sx, sy) => {
       const c = document.createElement("canvas");
       c.width = bw;
       c.height = bh;
       const g = c.getContext("2d", { willReadFrequently: true });
-      g.drawImage(img, x0, y0, bw, bh, 0, 0, bw, bh);
-      return g.getImageData(0, 0, bw, bh).data;
+      g.drawImage(img, sx, sy, bw, bh, 0, 0, bw, bh);
+      const data = g.getImageData(0, 0, bw, bh).data;
+      freeCanvas(c);
+      return data;
     };
-    const a = read(normal);
-    const b = read(variant);
+    const vx = variantIsCrop ? 0 : x0;
+    const vy = variantIsCrop ? 0 : y0;
+    const a = read(normal, x0, y0);
+    const b = read(variant, vx, vy);
     const mask = document.createElement("canvas");
     mask.width = bw;
     mask.height = bh;
@@ -1095,13 +1128,15 @@
     for (let k = 0; k < 3; k++) sg.drawImage(mask, 0, 0); // stacked blurs: a little wider, soft edge
     sg.filter = "none";
     sg.globalCompositeOperation = "source-in";
-    sg.drawImage(variant, x0, y0, bw, bh, 0, 0, bw, bh);
+    sg.drawImage(variant, vx, vy, bw, bh, 0, 0, bw, bh);
+    freeCanvas(mask);
     const out = document.createElement("canvas");
     out.width = w;
     out.height = h;
     const og = out.getContext("2d");
     og.drawImage(target, 0, 0);
     og.drawImage(soft, x0, y0);
+    freeCanvas(soft);
     return out;
   }
 
@@ -1149,13 +1184,24 @@
       if (name !== "normal" && box && (kind === "face" || kind === "eyes")) src = pasteFace(raw.normal, raw[name], box);
       else if (name !== "normal" && box && kind === "patch") src = pastePatch(raw.normal, raw[name], box);
       cut[name] = cutOutBackground(src, tolerance);
+      if (src !== raw[name]) freeCanvas(src);
     }
     // Let go of what nothing reads again: outfits rebuild faces from the uncut
     // pictures but never need the pose ones, and only `normal` and the poses
     // are hit-tested or measured pixel by pixel.
+    const rawIsCrop = {};
     for (const name of names) {
       if (poseNames.has(name)) delete raw[name];
-      else if (name !== "normal") cut[name].pixels = null;
+      else if (name !== "normal") {
+        cut[name].pixels = null;
+        // outfits only read the face (or eye) box of these: keep just that part
+        const kind = kinds[name];
+        const box = (kind === "eyes" || (kind === "patch" && EYE_ONLY.includes(name))) && def.eyeBox ? def.eyeBox : def.faceBox;
+        if (box && kind !== "patch") {
+          raw[name] = cropBox(raw[name], box);
+          rawIsCrop[name] = true;
+        }
+      }
     }
     const base = cut.normal;
     const textures = {};
@@ -1192,7 +1238,7 @@
       let n = 0;
       for (let y = b.minY; y < Math.min(H, b.minY + Math.round(H * 0.08)); y++) {
         for (let x = b.minX; x <= b.maxX; x += 2) {
-          if (c.pixels[(y * W + x) * 4 + 3] > 40) {
+          if (c.pixels[y * W + x] > 40) {
             sum += x;
             n++;
           }
@@ -1269,8 +1315,9 @@
         const kind = kinds[n];
         const box = (kind === "eyes" || (kind === "patch" && EYE_ONLY.includes(n))) && def.eyeBox ? def.eyeBox : def.faceBox;
         if (!box) continue;
-        const withFace = kind === "patch" ? pastePatch(img, raw[n], box) : pasteChanges(raw.normal, raw[n], img, box);
+        const withFace = kind === "patch" ? pastePatch(img, raw[n], box) : pasteChanges(raw.normal, raw[n], img, box, !!rawIsCrop[n]);
         set[n] = PIXI.Texture.from(cutOutBackground(withFace, tolerance).canvas);
+        freeCanvas(withFace);
         await new Promise((r) => setTimeout(r, 0)); // let the page breathe between pictures
       }
       // Pose pictures drawn in this outfit (def.outfitPoses), placed by the same rules as the usual ones.
@@ -1300,6 +1347,28 @@
     }
     let dressPoses = {}; // pose pictures of the outfit being worn
     let gone = false; // destroy() has run
+    // Put away an outfit that isn't worn: its pose objects, textures and pictures.
+    function releaseOutfit(k) {
+      const set = outfitSets[k];
+      if (!set || set.textures === dress) return;
+      delete outfitSets[k];
+      const texs = new Set();
+      for (const n in set.poses) {
+        const p = set.poses[n];
+        if (p.obj.texture) texs.add(p.obj.texture); // note it before the bent (sitting) one forgets it
+        body.removeChild(p.obj);
+        p.obj.destroy();
+        freeCanvas(p.cut.canvas);
+      }
+      for (const n in set.textures) {
+        const t = set.textures[n];
+        const src = t.baseTexture && t.baseTexture.resource && t.baseTexture.resource.source;
+        t.destroy(true);
+        freeCanvas(src);
+      }
+      for (const t of texs) t.destroy(true);
+      freeCanvas(set.base.canvas);
+    }
     // The picture shown for a pose: the outfit's own when it has one.
     const poseOf = (n) => dressPoses[n] || poses[n];
     let pose = "stand";
@@ -1428,7 +1497,7 @@
         const p = shown.toLocal(new PIXI.Point(x, y));
         const ix = Math.round(p.x);
         const iy = Math.round(p.y);
-        if (ix < 0 || iy < 0 || ix >= W || iy >= H || pixels[(iy * W + ix) * 4 + 3] <= 60) return [];
+        if (ix < 0 || iy < 0 || ix >= W || iy >= H || pixels[iy * W + ix] <= 60) return [];
         const fx = ix / W;
         const fy = iy / H;
         if (pose === "stand") {
@@ -1502,6 +1571,9 @@
         if (pose !== "stand" && !poseOf(pose)) pose = "stand";
         sprite.texture = dress.normal;
         showPose();
+        // Outfits taken off are let go (a whole set is well over 100 MB); wearing
+        // one again rebuilds it in a few seconds.
+        for (const k in outfitSets) if (k !== name) releaseOutfit(k);
       },
       // Read-only test hook (used by 工具/自检.mjs): who she is, the outfit worn, the pose pictures it has, and the pose shown now.
       getOutfit: () => ({ id: def.id, outfit: outfitWanted, poses: Object.keys(dressPoses), pose }),
