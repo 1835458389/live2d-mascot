@@ -1793,6 +1793,36 @@
           z-index: 1;
           border-bottom: 1px solid #eeebf7;
         }
+        .panel-head { cursor: move; user-select: none; touch-action: none; }
+        .panel-mode {
+          border: 1px solid #e3dff3;
+          background: #faf9fe;
+          color: #6a6385;
+          border-radius: 8px;
+          font: 12px/1 system-ui, "Microsoft YaHei", sans-serif;
+          padding: 5px 7px;
+          margin-right: 4px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .panel-mode:hover { background: #f1eefb; }
+        /* 居中大窗口：屏幕中间，宽一些，卡片排成两列，背后压暗 */
+        .panel.center {
+          position: fixed;
+          left: 50%;
+          top: 50%;
+          right: auto;
+          bottom: auto;
+          transform: translate(-50%, -50%);
+          width: min(660px, 94vw);
+          max-height: 86vh;
+          font-size: 14px;
+          z-index: 30;
+        }
+        .panel.center .page:not([hidden]) { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 10px; align-items: start; }
+        .panel.center .page > :not(.card) { grid-column: 1 / -1; }
+        .panel-veil { display: none; position: fixed; inset: 0; background: rgba(30, 20, 60, 0.28); z-index: 29; pointer-events: auto; }
+        .container:has(.panel.center:not([hidden])) .panel-veil { display: block; }
         .panel-close {
           border: none;
           background: none;
@@ -2086,10 +2116,12 @@
       <div class="container">
         <canvas class="stage"></canvas>
         <div class="bubble"><span class="shown"></span><span class="rest"></span></div>
+        <div class="panel-veil ui"></div>
         <div class="panel ui" hidden>
           <div class="panel-head">
             <img class="ph-av" alt="" />
             <div class="ph-who"><b class="ph-name">看板娘设置</b><small class="ph-sub">设置会自动保存</small></div>
+            <button class="panel-mode" title="切换成屏幕中间的大窗口"></button>
             <button class="panel-close" title="关闭设置">×</button>
           </div>
           <div class="tabs">
@@ -2330,6 +2362,9 @@
       bubbleRest: q(".bubble .rest"),
       panel: q(".panel"),
       panelClose: q(".panel-close"),
+      panelMode: q(".panel-mode"),
+      panelVeil: q(".panel-veil"),
+      panelHead: q(".panel-head"),
       phAv: q(".ph-av"),
       phName: q(".ph-name"),
       characterSelect: q('select[data-k="character"]'),
@@ -2414,6 +2449,7 @@
     let facing = 1;
     let isMobile = false;
     let userPositioned = false;
+    let placedOnce = false; // she has been put at her starting corner once
 
     // Body regions in character units relative to her feet; refreshed by measureBody().
     let body = { top: 0, bottom: 0, half: 0, cx: 0 };
@@ -2458,8 +2494,11 @@
       if (perch || fall || hop) {
         // standing on, or on her way to, another program's window
       } else if (!userPositioned) {
-        actor.x = defaultX();
+        // The corner only the first time; after that she stays where she
+        // walked or was dropped (switching character, resizing, measuring).
+        actor.x = placedOnce ? clampX(actor.x) : defaultX();
         actor.y = groundY;
+        placedOnce = true;
       } else {
         actor.x = clampX(actor.x);
         actor.y = Math.min(Math.max(actor.y, h * 0.25), h - 10);
@@ -3229,6 +3268,7 @@
       if (hold || anim || sitting || sleeping || climb || hop || fall || dragState || mode === "walk") return false;
       anim = { steps, i: 0, at: performance.now() };
       character.setPose(steps[0][0]);
+      if (kind === "cheer") for (const c of companions) companionAnim(c, "cheer");
       return true;
     }
     function stepAnim(now) {
@@ -3918,6 +3958,7 @@
       if (!pointer || Math.abs(pointer.x - x) + Math.abs(pointer.y - y) > 30) pointerAt = Date.now();
       pointer = { x, y };
       if (character) character.focus(x, y);
+      for (const c of companions) if (c.r) c.r.focus(x, y);
       noteActivity();
 
       const region = isHidden() ? null : regionAt(x, y);
@@ -4901,6 +4942,9 @@
         pinnedUntil: 0, // after being dragged she stays put for a while
         fall: null, // { vy }
         dragging: false,
+        idleAction: null, // { name, start }: a stretch, yawn... like hers
+        anim: null, // { steps, i, at }: wave, drink, her own thing, cheer
+        nextIdleAt: performance.now() + 20000 + slot * 9000 + Math.random() * 20000,
       };
       app.stage.addChildAt(c.actor, app.stage.getChildIndex(actor)); // behind her
       c.bubble = document.createElement("div");
@@ -5097,6 +5141,15 @@
 
     function companionFrame(c) {
       const now = performance.now();
+      // She dozes off when nobody's around: so do they.
+      const sleepy = c.r.def.moods && c.r.def.moods.sleepy;
+      if (sleepy && dozeWeight > 0.001) c.r.applyMood(sleepy, dozeWeight);
+      if (c.idleAction) {
+        const a = IDLE_ACTIONS[c.idleAction.name];
+        const age = now - c.idleAction.start;
+        if (!a || age >= a.ms || c.speech || c.walking || c.dragging) c.idleAction = null;
+        else c.r.applyMood(a.frame(age / a.ms), Math.min(1, age / 300, (a.ms - age) / 300));
+      }
       if (c.mood) {
         if (now > c.mood.end + 400) c.mood = null;
         else c.r.applyMood(c.mood.params, Math.min(1, (now - c.mood.start) / 200) * Math.min(1, Math.max(0, (c.mood.end + 400 - now) / 400)));
@@ -5145,13 +5198,53 @@
       bb.style.setProperty("--tail-x", Math.min(Math.max(headX - left, 14), bw - 14) + "px");
     }
 
+    // Little things a companion does on her own now and then, so she isn't
+    // just standing there: a stretch or a yawn, a wave, a sip, her own thing.
+    // Quiet while you focus; asleep when the main character is asleep.
+    const mainAsleep = () => sleeping || (hold && hold.kind === "sleep");
+    function companionAnim(c, kind) {
+      const steps = ANIMS[kind];
+      if (!c.r || !steps || c.walking || c.dragging || c.fall || c.anim || mainAsleep()) return false;
+      if (!steps.every(([p]) => c.r.canPose && c.r.canPose(p) && poseFits(c.r, p))) return false;
+      c.anim = { steps, i: 0, at: performance.now() + 150 + c.slot * 200 }; // a beat after her
+      c.idleAction = null;
+      return true;
+    }
+    function companionPose(c, now) {
+      if (mainAsleep()) {
+        c.anim = null;
+        return "sleep";
+      }
+      if (!c.anim) return "stand";
+      if (now < c.anim.at) return "stand";
+      while (c.anim && now - c.anim.at >= c.anim.steps[c.anim.i][1]) {
+        c.anim.at += c.anim.steps[c.anim.i][1];
+        c.anim.i++;
+        if (c.anim.i >= c.anim.steps.length) c.anim = null;
+      }
+      return c.anim ? c.anim.steps[c.anim.i][0] : "stand";
+    }
+    function maybeCompanionIdle(c, now) {
+      if (now < c.nextIdleAt) return;
+      c.nextIdleAt = now + 18000 + Math.random() * 25000;
+      if (!settings.effects || c.speech || c.walking || c.dragging || c.fall || c.anim || c.idleAction || mainAsleep() || focusing() || chatting()) return;
+      if (idlePrompted) {
+        c.idleAction = { name: "yawn", start: now };
+        return;
+      }
+      if (Math.random() < 0.4 && companionAnim(c, ["act", "drink", "wave"][Math.floor(Math.random() * 3)])) return;
+      const names = Object.keys(IDLE_ACTIONS);
+      c.idleAction = { name: names[Math.floor(Math.random() * names.length)], start: now };
+    }
+
     function stepCompanions(now, dtMs) {
       const taken = bubble.classList.contains("show") ? [bubble.getBoundingClientRect()] : [];
       for (const c of companions) {
         if (!c.r) continue;
         stepCompanion(c, now, dtMs);
+        maybeCompanionIdle(c, now);
         if (c.r.canPose) {
-          let want = c.dragging || c.fall ? "held" : c.walking ? walkFrame(c.r, now + c.slot * 97) : "stand";
+          let want = c.dragging || c.fall ? "held" : c.walking ? walkFrame(c.r, now + c.slot * 97) : companionPose(c, now);
           if (want !== "stand" && !(c.r.canPose(want) && poseFits(c.r, want))) want = "stand";
           if (want !== c.pose) {
             c.r.setPose(want);
@@ -5636,6 +5729,73 @@
     dom.panelClose.addEventListener("click", () => {
       panel.hidden = true;
     });
+    dom.panelVeil.addEventListener("click", () => {
+      panel.hidden = true;
+    });
+
+    // Two ways to show settings: the small panel by her corner (drag it by its
+    // title bar anywhere; the spot is remembered), or a big window in the
+    // middle of the screen. The button in the title bar switches.
+    function placePanel() {
+      const center = settings.panelMode === "center";
+      panel.classList.toggle("center", center);
+      dom.panelMode.textContent = center ? "⤡ 小窗" : "⤢ 大窗";
+      dom.panelMode.title = center ? "换回她身边的小面板" : "切换成屏幕中间的大窗口";
+      for (const k of ["left", "top", "right", "bottom", "transform"]) panel.style[k] = "";
+      const pos = !center && settings.panelPos;
+      if (pos && !panel.hidden) {
+        const cont = containerEl.getBoundingClientRect();
+        const r = panel.getBoundingClientRect();
+        const x = Math.min(Math.max(pos[0], 0), Math.max(0, window.innerWidth - r.width));
+        const y = Math.min(Math.max(pos[1], 0), Math.max(0, window.innerHeight - r.height));
+        panel.style.left = x - cont.left + "px";
+        panel.style.top = y - cont.top + "px";
+        panel.style.right = "auto";
+        panel.style.bottom = "auto";
+      }
+    }
+    dom.panelMode.addEventListener("click", () => {
+      settings.panelMode = settings.panelMode === "center" ? "corner" : "center";
+      saveSettings(settings);
+      placePanel();
+    });
+    new MutationObserver(() => {
+      if (!panel.hidden) placePanel();
+    }).observe(panel, { attributes: true, attributeFilter: ["hidden"] });
+    placePanel();
+    let panelDrag = null;
+    dom.panelHead.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target.closest("button")) return;
+      const r = panel.getBoundingClientRect();
+      panelDrag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top };
+      dom.panelHead.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    dom.panelHead.addEventListener("pointermove", (e) => {
+      if (!panelDrag || e.pointerId !== panelDrag.id) return;
+      const r = panel.getBoundingClientRect();
+      const cont = containerEl.getBoundingClientRect();
+      const x = Math.min(Math.max(e.clientX - panelDrag.dx, 0), Math.max(0, window.innerWidth - r.width));
+      const y = Math.min(Math.max(e.clientY - panelDrag.dy, 0), Math.max(0, window.innerHeight - 40));
+      panel.style.transform = "none";
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+      // the centered window is fixed to the screen; the small one sits in the widget box
+      const fixed = panel.classList.contains("center");
+      panel.style.left = (fixed ? x : x - cont.left) + "px";
+      panel.style.top = (fixed ? y : y - cont.top) + "px";
+      panelDrag.at = [x, y];
+    });
+    const endPanelDrag = (e) => {
+      if (!panelDrag || e.pointerId !== panelDrag.id) return;
+      if (panelDrag.at && settings.panelMode !== "center") {
+        settings.panelPos = panelDrag.at.map(Math.round);
+        saveSettings(settings);
+      }
+      panelDrag = null;
+    };
+    dom.panelHead.addEventListener("pointerup", endPanelDrag);
+    dom.panelHead.addEventListener("pointercancel", endPanelDrag);
 
     // -----------------------------------------------------------------
     // Minimize / close / API
